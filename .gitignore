@@ -3,7 +3,7 @@
 .Rapp.history
 
 # folders
-/data
+# /data
 /figures
 /dataOutput
 
