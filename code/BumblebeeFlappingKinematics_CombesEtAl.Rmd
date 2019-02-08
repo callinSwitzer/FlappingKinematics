@@ -57,7 +57,7 @@ ipak <- function(pkg){
   sapply(pkg, require, character.only = TRUE)
 }
 
-packages <- c("lme4", "influence.ME", "data.table", "tidyverse")
+packages <- c("lme4", "lmerTest", "influence.ME", "data.table", "tidyverse")
 ipak(packages)
 
 # set ggplot theme
@@ -80,8 +80,10 @@ print(R.version)
 ---
 
 ```{r}
-bdta <- read_csv(file.path(dataDir, "FinalBeeRespData_raw.csv"))
+bdta <- read_csv(file.path(dataDir, "beeRespData_final.csv"))
 summary(bdta)
+
+
 ```
 
 ---
@@ -89,6 +91,10 @@ summary(bdta)
 ---
 
 ```{r}
+# Note: new dataset (with video, rather than audio, wingbeat freq) 
+# has the following differences:
+# "freq"  "U"     "freq2" "frce" 
+
 bdta <- bdta %>%
   mutate(
      MT = (M2 + MF)/2,
@@ -106,6 +112,7 @@ bdta <- bdta %>%
      Treatment = as.factor(as.character(Treatment)),
      BeeID = as.factor(as.character(BeeID))
      )
+
 
 # Create a new dataframe that calculates the changes for each individual bee
 newDF <- data.frame()
@@ -173,15 +180,12 @@ bdta <- bdta %>%
 
 ```{r}
 
-biplot(aa, main = "Three size measurements") # shows that all three size measurement are correlated
+biplot(aa, main = "Three size measurements", xlim = c(-1,1), ylim = c(-1,1)) # shows that all three size measurement are correlated
 
 # show scatterplot matrix to see correlations among size predictors
 car::scatterplotMatrix(newDF[, c("Mstarved", "Itspan", "S",  "wingLen",  "size_pc1")])
 
 ```
-
-
-
 
 
 ---
@@ -368,9 +372,12 @@ dev.off()
 ```
 
 
-
 ## Stroke Amplitude
 ```{r}
+# calculate mean + sd for each treatment
+tapply(bdta$amp, INDEX = bdta$Treatment, function(x) c(mean(x), sd(x)))
+
+
 # make a full model with all two-way interactions
 m1 <- lmer(amp ~  (size_pc1 +  order + Treatment)^2 + (1|BeeID), data = bdta)
 
@@ -382,6 +389,7 @@ m2.0 <- update(m1, .~. - order:Treatment )
 
 anova(m1, m2.0)
 summary(m2.0)
+
 
 
 m2.1 <- update(m2.0,.~. - size_pc1:order)
@@ -413,7 +421,12 @@ m5 <- update(m3, .~. - Treatment)
 anova(m3, m5) # keep treatment
 
 # summarize final model for paper
-summary(m3)
+smry <- summary(m3)
+smry
+smry$coefficients
+anova(m3, type = 2)
+
+confint.merMod(m3)
 
 # write output
 summary(m3)$coefficients  
@@ -458,6 +471,19 @@ ggplot(aes(x = order2, y = amp)) +
 ## Wingbeat Freq
 
 ```{r}
+
+# how many trials increased
+newDF$FreqHigherInHeavy <- (newDF$freq_H - newDF$freq_L) > 0
+summary(newDF$FreqHigherInHeavy)
+sum(newDF$FreqHigherInHeavy) / nrow(newDF)
+
+# calculate mean + sd for each treatment
+tapply(bdta$freq, INDEX = bdta$Treatment, function(x) c(mean(x), sd(x)))
+
+tapply(newDF$FreqHigherInHeavy, INDEX = newDF$order_1, summary)
+
+
+
 # make a full model with all two-way interactions
 m1 <- lmer(freq ~  (size_pc1 +  order + Treatment)^2 + (1|BeeID), data = bdta)
 
@@ -465,13 +491,13 @@ summary(m1)
 
 
 ### LRT's for interactions
-m2.0 <- update(m1, .~. - size_pc1:Treatment )
+m2.0 <- update(m1, .~. - size_pc1:order )
 
 anova(m1, m2.0)
 summary(m2.0)
 
 
-m2.1 <- update(m2.0,.~. - size_pc1:order)
+m2.1 <- update(m2.0,.~. - size_pc1:Treatment)
 anova(m2.0, m2.1)
 summary(m2.1)
 
@@ -500,6 +526,7 @@ anova(m2, m5)
 
 # summarize final model for paper
 summary(m2)
+anova(m2, type = 2)
 
 # write output
 summary(m2)$coefficients  
@@ -560,6 +587,7 @@ m4 <- update(m3, .~. - size_pc1:order_1)
 anova(m3, m4) 
 summary(m4)
 
+# squared terms
 m5 <- update(m4, .~. - deltaLoad2)
 anova(m4,m5) 
 
@@ -586,6 +614,16 @@ y <- residuals(m7, type = 'partial')[, "deltaLoad"]
 
 # plot partial residuals with base R plotting
 plot(x = newDF$deltaLoad, y = y)
+
+
+# plot partial residuals with base R plotting
+arcLenDF <- data.frame(deltaLoad = newDF$dLoad_nonCent, partialResid_deltaFreq = y)
+plot(arcLenDF)
+
+# write file for partial residuals
+write_csv(x = arcLenDF, 
+          file.path(dataOut, 
+                    "PartialResiduals_deltaArcLen.csv"))
 
 # double check to make sure the slope for partial residual plots are the 
 # same as in the original regression
@@ -630,8 +668,12 @@ ggsave(filename = file.path(figDir, "fig4a.png"), width = 6.5/2, height = 2,
 # fit full model
 m1 <- lm(deltaFrq2 ~  (deltaLoad +  size_pc1 + order_1)^2  + 
               size_pc1_2  + deltaLoad2, data = newDF)
+
 summary(m1)
-car::vif(m1) # some serious multicollinearity
+
+# some serious multicollinearity
+# means we can't evaluate interactions very accurately
+car::vif(m1) 
 
 m2 <- update(m1, .~. - size_pc1:order_1)
 anova(m1, m2)
@@ -653,30 +695,45 @@ summary(m5)
 
 m6 <- update(m5, .~.  - deltaLoad2)
 anova(m6, m5) 
-summary(m6) # final model for paper
+summary(m6) 
 
 m7 <- update(m6, .~. - size_pc1)
-anova(m7, m6) # p-values for size
-m8 <- update(m6, .~. - deltaLoad)
-anova(m6, m8) # p-value for deltaLoad
-m9 <- update(m6, .~. - order_1)
-anova(m6, m9) # p-value for order
+anova(m7, m6)
 
+
+summary(m7) # final model for paper, b/c we're interested in load
+car::vif(m7)
+
+
+m8 <- update(m7, .~. - deltaLoad)
+anova(m7, m8) 
+summary(m8)
+
+m9 <- update(m8, .~. - order_1)
+anova(m7, m9) # p-value for order
+
+summary(m8) 
 
 ### model diagnostics
 par(mfrow = c(2,3))
-plot(m6, which = 1:6) # no glaring violations
+plot(m7, which = 1:6) # no glaring violations
 par(mfrow = c(1,1))
 
-car::vif(m6) # vif is a little high
 
 ### model visualization
 # calculate partial residuals for deltaLoad
 # these are the  residuals, minus the effect of detlaLoad
-y <- residuals(m6, type = 'partial')[, "deltaLoad"]
+y <- residuals(m7, type = 'partial')[, "deltaLoad"]
 
 # plot partial residuals with base R plotting
-plot(x = newDF$deltaLoad, y = y)
+freqDF <- data.frame(deltaLoad = newDF$dLoad_nonCent, partialResid_deltaFreq = y)
+plot(freqDF)
+
+# write file for partial residuals
+write_csv(x = freqDF, 
+          file.path(dataOut, 
+                    "PartialResiduals_deltaFreq2.csv"))
+
 
 # double check to make sure the slope for partial residual plots are the 
 # same as in the original regression
@@ -696,8 +753,6 @@ ggplot(newDF, aes(x= deltaLoad, y = deltaFrq2, color = size_pc1, shape = order_1
 
 
 # y axis isn't easily interpretable
-
-
 ggplot(newDF, aes(x= dLoad_nonCent, y = y)) + 
      geom_point(shape = 17) + 
   xlim(c(0.03, 0.12)) + 
@@ -710,7 +765,7 @@ fig4b <- ggplot(newDF, aes(x= dLoad_nonCent, y = y)) +
   geom_point(shape = 17) + 
   xlim(c(0.03, 0.12)) + 
   labs(x = "delta load (g)", y = "Δ Frequency^2 partial residual" ) + 
-  stat_smooth(method = 'lm', se = FALSE, color = "black", lty = 2, size = 0.5) + 
+  #stat_smooth(method = 'lm', se = FALSE, color = "black", lty = 2, size = 0.5) + 
   scale_y_continuous(labels = scales::scientific, limits = c(-8e3, 8e3)) + 
   theme(legend.title = element_blank(), 
         legend.background = element_rect(colour = "black", size = 0.3), 
@@ -727,7 +782,7 @@ ggsave(filename = file.path(figDir, "fig4b.png"), width = 6.5/2, height = 2,
 
 # partial residuals for order
 
-y <- residuals(m6, type = 'partial')[, "order_1"]
+y <- residuals(m7, type = 'partial')[, "order_1"]
 
 ggplot(newDF, aes(x= order_1, y = y)) + 
      geom_boxplot() + 
@@ -735,17 +790,16 @@ ggplot(newDF, aes(x= order_1, y = y)) +
           y = "partial residuals for order \n i.e. order effect on freq^2 \n while subtracing affect of bee size and load") + 
      stat_smooth(method = 'lm', se = FALSE)
 
-# holding bee size and delta load constant, if a bee was loaded second, (confusing, huh?) then it would have a much lower freq^2 than if it was loaded first
+# holding delta load constant, if a bee was loaded second, then it would have a much lower freq^2 than if it was loaded first
 
-summary(m6)
+summary(m7)
 ```
 
 <hr>
 ### Takeaways from (delta freq^2) model:
-1. Order, size, and deltaLoad are associated with a change in frequency^2.  We find no evidence of non-linear relationships or interactions.
-2. Holding size and order constant, we find that a larger deltaLoad causes a decrease in deltaFrequency^2
-3. Holding other variables constant, an increase in bee size is associated with a larger deltaFrequency^2.
-4. Holding other variables constant, if the bee was loaded second, then they had a lower deltaFrequency^2 than if they were loaded first. 
+1. Order is associated with a change in frequency^2.  We find no evidence of non-linear relationships or interactions.
+2. We find no significant affect of deltaload on deltaFrequency^2
+3. Holding other variables constant, if the bee was loaded second, then they had a lower deltaFrequency^2 than if they were loaded first. 
 
 <hr>
 
@@ -753,7 +807,8 @@ summary(m6)
 # we investigated the change in metabolic rate between light and heavy loading trials
 
 ```{r}
-mm1 <- lm(deltaMetR ~ deltaFrq2 + deltaArcL2 + deltaLoad + size_pc1 + deltaLoad2, data = newDF)
+mm1 <- lm(deltaMetR ~ deltaFrq2 + deltaArcL2 + 
+            deltaLoad + size_pc1 + deltaLoad2, data = newDF)
 car::vif(mm1)
 
 summary(mm1)
@@ -762,12 +817,12 @@ mm2 <- update(mm1, .~. - size_pc1)
 anova(mm1, mm2)
 summary(mm2)
 
-mm3 <- update(mm2, .~. - deltaArcL2)
-anova(mm3, mm2) # p-value for acrlength
+mm3 <- update(mm2, .~. - deltaLoad2)
+anova(mm3, mm2) 
 summary(mm3)
 
-mm4 <- update(mm3, .~. - deltaLoad2)
-anova(mm3, mm4)
+mm4 <- update(mm3, .~. - deltaArcL2 )
+anova(mm4, mm3) # pval for arcleng2
 summary(mm4)
 
 mm5 <- update(mm4, .~. - deltaLoad) 
@@ -792,11 +847,14 @@ prDfreq2 <- residuals(mm7, type = 'partial')[, "deltaFrq2"]
 plot(x = newDF$deltaLoad, y = prDload)
 plot(x = newDF$deltaFrq2, y = prDfreq2)
 
-partResidFig4 <- data.frame(deltaLoad = newDF$deltaLoad, 
-                            partResDeltaLoad = prDload, 
-                            deltaFreq2 = newDF$deltaFrq2, 
-                            partResDeltaFreq2 = prDfreq2)
+# save partial residuals
+partialMetRateDF <- data.frame(deltaLoad = newDF$dLoad_nonCent, 
+                               partialDeltaLoad = prDload, 
+                               deltaFreq2 = newDF$deltaFrq2, 
+                               partialDeltaFreq2 = prDfreq2)
 
+write_csv(partialMetRateDF, 
+          file.path(dataOut, "PartialResid_MetRate.csv"))
 
 ## model diagnostics
 car::vif(mm7)
@@ -821,15 +879,15 @@ summary(lm(y ~ newDF$deltaLoad))
 summary(mm7)
 
 # this is what the raw data look like
-plot(x = newDF$deltaLoad, y = newDF$deltaMetR)
+plot(x = newDF$dLoad_nonCent, y = newDF$deltaMetR)
 
 
 fig5a <- ggplot(newDF, aes(x= dLoad_nonCent, y = y)) + 
   geom_point(shape = 17) + 
   xlim(c(0.03, 0.12)) + 
-  labs(x = "delta load (g)", y = "Δ Metabolic Rate partial residual" ) + 
-  stat_smooth(method = 'lm', se = FALSE, color = "black", lty = 2, size = 0.5) + 
-  scale_y_continuous(limits = c(-2, 3.5)) + 
+  labs(x = "Δ load (g)", y = "Δ Metabolic Rate partial residual" ) + 
+  #stat_smooth(method = 'lm', se = FALSE, color = "black", lty = 2, size = 0.5) + 
+  scale_y_continuous(limits = c(-2.5, 5)) + 
   theme(legend.title = element_blank(), 
         legend.background = element_rect(colour = "black", size = 0.3), 
         legend.position = c(0.8, 0.16), 
@@ -860,13 +918,13 @@ summary(mm7)
 # this is what the raw data look like
 plot(x = newDF$deltaFrq2, y = newDF$deltaMetR)
 
-
-fig5b <- ggplot(newDF, aes(x= deltaFrq2, y = y)) + 
+colnames(partialMetRateDF)
+fig5b <- ggplot(partialMetRateDF, aes(x= deltaFreq2, y = partialDeltaFreq2)) + 
   geom_point(shape = 17) + 
-  xlim(c(-6*10^3, 9e3)) + 
-  labs(x = "delta frequency^2", y = "Δ Metabolic Rate partial residual" ) + 
+  xlim(c(-6*10^3, 13e3)) + 
+  labs(x = "Δ frequency^2", y = "Δ Metabolic Rate partial residual" ) + 
   stat_smooth(method = 'lm', se = FALSE, color = "black", lty = 2, size = 0.5) + 
-  scale_y_continuous(limits = c(-3, 5)) + 
+  #scale_y_continuous(limits = c(-3, 6)) + 
   theme(legend.title = element_blank(), 
         legend.background = element_rect(colour = "black", size = 0.3), 
         legend.position = c(0.8, 0.16), 
@@ -885,16 +943,19 @@ ggsave(filename = file.path(figDir, "fig5b.png"), width = 6.5/2, height = 2,
 
 <hr>
 ### Takeaways for deltaMetRate model:
-1. Deltafreq^2 and deltaLoad are both associated with deltaMetR.
-2. Holding deltafreq constant (not necessarily at 0), an increase in deltaload is associated with an increase in deltametabolicRate
+1. Deltafreq^2 is associated with deltaMetR.
+2. Holding deltafreq constant (not necessarily at 0), an increase in deltaload is not associated with a significant change in deltametabolicRate
 3. Holding deltaLoad constant (not holding load constant, and again, not holding deltaload necessarily at 0), an increase in deltaFreq^2 is associated with an increase in deltaMetabolic rate. 
 4. We found no evidence to suggest that a change in deltaArcL^2 is associated with deltametabolicRate. (this is not saying that arcLength doesn't affect metabolic rate).
 
 <hr>
 
+
 #  modeled the change in metabolic rate per 1% of additional loading
 
 ```{r}
+summary(newDF$avgPercLoad)
+
 newDF <- within(newDF, {dmr_dpl = deltaMetR / deltaPercLoad})
 plot(deltaMetR  ~ dmr_dpl, data = newDF)
 
@@ -903,6 +964,7 @@ summary(mod1)
 
 mod2 <- update(mod1, .~. - size_pc1)
 anova(mod1, mod2) # remove size_pc1
+summary(mod2)
 
 mod3 <- update(mod2, .~. - order_1)
 anova(mod2, mod3) # remove order
@@ -992,7 +1054,6 @@ ggsave(filename = file.path(figDir, "fig6a.png"), width = 6.5/2, height = 2,
 newDF <- within(newDF, {df2_dpl = deltaFrq2 / deltaPercLoad})
 
 mod1_f <- lm(deltaFrq2  ~  avgPercLoad + order_1 + size_pc1, data = newDF)
-
 summary(mod1_f)
 
 mod2_f <- update(mod1_f, .~. - size_pc1)
@@ -1004,8 +1065,7 @@ summary(mod2_f) # not final model for paper
 anova(mod2_f,  update(mod2_f, .~. - order_1)) # p-value for order
 
 par(mfrow = c(2,2))
-plot(mod2_f) # non-linearity in residuals
-
+plot(mod2_f) # possible non-linearity in residuals
 plot(mod2_f, which = 4)
 
 
@@ -1029,6 +1089,8 @@ plot(m22s, which = 4)
 
 summary(m22a) # final model for paper 
 
+#refref: save data for Fig 6b
+
 ## visualize model for deltametRate/avgPercLoading
 
 ndf <- data.frame(avgPercLoad_cent = seq(min(newDF$avgPercLoad_cent), max(newDF$avgPercLoad_cent), length.out = 200), 
@@ -1048,7 +1110,8 @@ predDF<- mutate(predDF,
 par(mfrow = c(1,1))
 plot(df2_dpl  ~ avgPercLoad, col = factor(order_1), data = newDF, pch = 20)
 
-newDF[22, ]
+
+
 
 ggplot(newDF, aes(x = avgPercLoad, y = df2_dpl)) + 
      geom_point(aes(color = order_1),shape = 17) + 
@@ -1081,8 +1144,49 @@ ggplot( aes(x = avgPercLoad, y = df2_dpl)) +
   scale_shape_manual(name = "Order", values = c(25, 24)) +
   scale_linetype_manual(name = "Order", values = c(2,1))
 
+
 ggsave(filename = file.path(figDir, "fig6b.png"), width = 6.5/2, height = 2, 
        units = "in", dpi = 500)
+
+## save line as csv file
+
+predDF_small <- predDF %>% 
+  mutate(predictedLine = preds.fit, 
+         avg_perc_load = apl, 
+         load_order = recode(order_1, "loadedFirst" = "Heavy -> Light",
+                             "loadedSecond" = "Light -> Heavy")) %>%
+  select(avg_perc_load, load_order, predictedLine)
+
+write_csv(predDF_small, file.path(dataOut, "PredictedLine_Fig6b.csv"))
+
+newDF_6b <- newDF %>%
+  mutate(avg_perc_load = avgPercLoad, 
+         delta_freq2_perLoad = df2_dpl, 
+        load_order = recode(order_1, "loadedFirst" = "Heavy -> Light",
+                             "loadedSecond" = "Light -> Heavy")) %>%
+  select(avg_perc_load, delta_freq2_perLoad, load_order)
+
+write_csv(newDF_6b, file.path(dataOut, "dataPoints_Fig6b.csv"))
+  
+
+# double check data to make sure I saved the right data
+ggplot(newDF_6b, aes(x = avg_perc_load, y = delta_freq2_perLoad)) + 
+     geom_point(aes(color = load_order, shape = load_order )) + 
+     geom_line(data = predDF_small, aes(x = avg_perc_load, y = predictedLine, color = load_order, lty = load_order)) + 
+     labs(x = "Average Load (% bodymass)", 
+          y = "Change in wingbeat freq^2 (hz^2) / \n Change in Load (% bodymass)") + 
+     scale_color_viridis_d( name = "Order", end = 0.8) + 
+     theme(legend.title = element_blank(), 
+        legend.background = element_rect(colour = "black", size = 0.3), 
+        legend.position = c(0.8,0.8), 
+        legend.text = element_text(size = 6), 
+        axis.text = element_text(size = 6), 
+        axis.title = element_text(size = 6), 
+        legend.key.size = unit(0.2, "cm"))  + 
+  scale_shape_manual(name = "Order", values = c(25, 24)) +
+  scale_linetype_manual(name = "Order", values = c(2,1))
+
+
 ```
 
 
@@ -1103,6 +1207,7 @@ summary(mod2_a)
 
 mod2_b <- update(mod2_a, .~. - size_pc1)
 anova(mod2_a, mod2_b)  # remove size
+summary(mod2_b)
 
 mod2c <- update(mod2_b, .~. - order_1)
 anova(mod2c, mod2_b) # remove order
