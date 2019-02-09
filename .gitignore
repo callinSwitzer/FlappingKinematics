@@ -4,8 +4,8 @@
 
 # folders
 # /data
-/figures
-/dataOutput
+#/figures
+#/dataOutput
 
 
 # DS_Store
