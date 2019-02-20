@@ -82,8 +82,6 @@ print(R.version)
 ```{r}
 bdta <- read_csv(file.path(dataDir, "beeRespData_final.csv"))
 summary(bdta)
-
-
 ```
 
 ---
@@ -329,13 +327,11 @@ with(bdta[bdta$Treatment == "L", ], {
   lines(x = perLoad, y = predict(mod2))
 })
 
-
 ```
 
 ## Force vs. body mass
 
 ```{r}
-
 m1 <- lmer(frce ~ Treatment * MT + (1|BeeID), data = bdta)
 summary(m1)
 
@@ -634,6 +630,10 @@ m7 <- update(m6, .~. - order_1)
 anova(m7, m6)
 summary(m7) # final model for paper
 
+# copy model coefs (to be pasted in excel)
+# minor note, <2e-16 gets converted to 1.57e-16 in this instance
+write.table(as.data.frame(summary(m7)$coef),"clipboard",sep="\t")
+
 # Note that the t-stat^2 is the same as a partial f-test
 anova(update(m7, .~. - deltaLoad), m7, test = "F") # p-value for delta load
 anova(update(m7, .~. - size_pc1),  m7) # p-value for size
@@ -707,26 +707,30 @@ m1 <- lm(deltaFrq2 ~  (deltaLoad +  size_pc1 + order_1)^2  +
 summary(m1)
 
 # some serious multicollinearity
-# means we can't evaluate interactions very accurately
+# means we can't evaluate interactions very accurately (nor can we trust overall F test)
 car::vif(m1) 
 
 m2 <- update(m1, .~. - size_pc1:order_1)
 anova(m1, m2)
-
+car::vif(m2) # better, but still concerning
 summary(m2)
-m3 <- update(m2, .~. - deltaLoad:size_pc1)
 
+
+m3 <- update(m2, .~. - deltaLoad:size_pc1)
 anova(m2, m3)
 summary(m3)
+car::vif(m3)
+
 
 m4 <- update(m3, .~. - deltaLoad:order_1)
 anova(m3, m4) 
 summary(m4)
+car::vif(m4)
 
 m5 <- update(m4, .~. - deltaLoad2)
 anova(m4,m5) 
-
 summary(m5)
+car::vif(m5) # acceptable
 
 m6 <- update(m5, .~.  - size_pc1_2)
 anova(m6, m5) 
@@ -739,6 +743,8 @@ anova(m7, m6)
 summary(m7) # final model for paper, b/c we're interested in load
 car::vif(m7)
 
+# copy to clipboard, to paste into excel
+write.table(data.frame(summary(m7)$coef),"clipboard",sep="\t")
 
 m8 <- update(m7, .~. - deltaLoad)
 anova(m7, m8) 
@@ -846,15 +852,20 @@ mm1 <- lm(deltaMetR ~ deltaFrq2 + deltaArcL2 +
             deltaLoad + size_pc1 + deltaLoad2, data = newDF)
 car::vif(mm1)
 
+# note that the overall p-value, p = 0.0508 may be due to a "masking effect" of non-significant terms
+# or due to collinearity of delta load
+# see: https://stats.stackexchange.com/questions/24720/significance-contradiction-in-linear-regression-significant-t-test-for-a-coeffi
 summary(mm1)
 
-mm2 <- update(mm1, .~. - size_pc1)
+mm2 <- update(mm1, .~. - deltaLoad2)
 anova(mm1, mm2)
 summary(mm2)
 
-mm3 <- update(mm2, .~. - deltaLoad2)
+mm3 <- update(mm2, .~. - size_pc1)
 anova(mm3, mm2) 
 summary(mm3)
+
+# note mm3 is the model that includes delta arcleng2
 
 mm4 <- update(mm3, .~. - deltaArcL2 )
 anova(mm4, mm3) # pval for arcleng2
@@ -870,6 +881,8 @@ anova(mm4, mm6) # p-value for deltafrq2
 mm7 <- mm4
 
 summary(mm7) # final model for paper
+# copy to clipboard, to paste into excel
+write.table(data.frame(summary(mm7)$coef),"clipboard",sep="\t")
 
 
 # calculate partial residuals from model 7 for deltaload and deltafreq2
@@ -1009,6 +1022,10 @@ anova(mod2, mod3) # remove order
 
 
 summary(mod3) # final model for paper
+# copy to clipboard, to paste into excel
+write.table(data.frame(summary(mod3)$coef),"clipboard",sep="\t")
+
+
 
 # get p-values for avgPercLoad and order
 anova(mod2, update(mod3, .~. - avgPercLoad)) # p-value for avg perc load
@@ -1134,7 +1151,8 @@ summary(m22s) # no major change when we remove obs num 22
 plot(m22s, which = 4)
 
 summary(m22a) # final model for paper 
-
+# copy to clipboard, to paste into excel
+write.table(data.frame(summary(m22a)$coef),"clipboard",sep="\t")
 
 
 ## visualize model for deltametRate/avgPercLoading
@@ -1244,6 +1262,9 @@ newDF <- within(newDF, {da2_dpl = deltaArcL2 / deltaPercLoad})
 
 mod1_a <- lm(da2_dpl  ~ avgPercLoad + order_1 + size_pc1, data = newDF)
 summary(mod1_a) # P-values for original model
+# copy to clipboard, to paste into excel
+write.table(as.data.frame(summary(mod1_a)$coef),"clipboard",sep="\t", row.names = TRUE)
+
 
 mod2_a <- update(mod1_a, .~. - avgPercLoad)  # I also checked for a squared term in this model (code not shown)
 anova(mod1_a, mod2_a) # remove avgPercLoad
@@ -1259,6 +1280,8 @@ mod2c <- update(mod2_b, .~. - order_1)
 anova(mod2c, mod2_b) # remove order
 
 summary(mod2c) # final mod for paper
+# copy to clipboard, to paste into excel
+write.table(as.data.frame(summary(mod2c)$coef),"clipboard",sep="\t", row.names = TRUE)
 
 par(mfrow = c(2,2))
 plot(mod2_a)
