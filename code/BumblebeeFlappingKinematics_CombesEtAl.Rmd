@@ -1,7 +1,7 @@
 ---
 title: "Bumblebee Flapping Kinematics"
 author: "Callin Switzer"
-date: "Feb 9, 2019"
+date: "Feb 21, 2019"
 output: html_document
 editor_options: 
   chunk_output_type: console
@@ -849,84 +849,68 @@ summary(m7)
 
 ```{r}
 mm1 <- lm(deltaMetR ~ deltaFrq2 + deltaArcL2 + 
-            deltaLoad + size_pc1 + deltaLoad2, data = newDF)
+            deltaLoad + size_pc1, data = newDF)
 car::vif(mm1)
-
-# note that the overall p-value, p = 0.0508 may be due to a "masking effect" of non-significant terms
-# or due to collinearity of delta load
-# see: https://stats.stackexchange.com/questions/24720/significance-contradiction-in-linear-regression-significant-t-test-for-a-coeffi
 summary(mm1)
 
-mm2 <- update(mm1, .~. - deltaLoad2)
+mm2 <- update(mm1, .~. - size_pc1)
 anova(mm1, mm2)
-summary(mm2)
+summary(mm2) # final model for paper
 
-mm3 <- update(mm2, .~. - size_pc1)
-anova(mm3, mm2) 
-summary(mm3)
+#mm2 <- update(mm2, .~. - deltaArcL2)
 
+
+
+# final model for paper, since arclen and freq were a priori variables of interest
 # note mm3 is the model that includes delta arcleng2
-
-mm4 <- update(mm3, .~. - deltaArcL2 )
-anova(mm4, mm3) # pval for arcleng2
-summary(mm4)
-
-mm5 <- update(mm4, .~. - deltaLoad) 
-anova(mm5, mm4) # p-value for load
-
-mm6 <- update(mm4, .~. - deltaFrq2)
-anova(mm4, mm6) # p-value for deltafrq2
-
-# rename model
-mm7 <- mm4
-
-summary(mm7) # final model for paper
 # copy to clipboard, to paste into excel
-write.table(data.frame(summary(mm7)$coef),"clipboard",sep="\t")
+write.table(data.frame(summary(mm2)$coef),"clipboard",sep="\t")
 
+# calculate partial residuals deltaload and deltafreq2 and deltaarcL2
+prDload <- residuals(mm2, type = 'partial')[, "deltaLoad"]
+partialPreds_Dload <- predict(lm(prDload ~ newDF$deltaLoad))
+prDfreq2 <- residuals(mm2, type = 'partial')[, "deltaFrq2"]
+partialPreds_deltaFreq2 <- predict(lm(prDfreq2 ~ newDF$deltaFrq2))
+prDArcLen2 <- residuals(mm2, type = 'partial')[, "deltaArcL2"]
 
-# calculate partial residuals from model 7 for deltaload and deltafreq2
-
-prDload <- residuals(mm7, type = 'partial')[, "deltaLoad"]
-prDfreq2 <- residuals(mm7, type = 'partial')[, "deltaFrq2"]
+# save partial residuals
+partialMetRateDF <- data.frame(deltaLoad = newDF$dLoad_nonCent, 
+                               partialDeltaLoad = prDload, 
+                               predictedLine_partials_deltaLoad = partialPreds_Dload,
+                               deltaFreq2 = newDF$deltaFrq2, 
+                               partialDeltaFreq2 = prDfreq2, 
+                               predictedLine_partials_deltaFreq2 = partialPreds_deltaFreq2, 
+                               deltaArcLen2 = newDF$deltaArcL2, 
+                               partialDeltaArcLen2 = prDArcLen2
+                               )
+write_csv(partialMetRateDF, 
+          file.path(dataOut, "PartialResid_MetRate_Fig5a_5b_5c.csv"))
 
 
 # plot partial residuals with base R plotting
+par(mfrow = c(3,1))
 plot(x = newDF$deltaLoad, y = prDload)
 plot(x = newDF$deltaFrq2, y = prDfreq2)
-
+plot(x = newDF$deltaFrq2, y = prDArcLen2)
+par(mfrow = c(1,1))
 
 
 ## model diagnostics
-car::vif(mm7)
+car::vif(mm2)
 
 par(mfrow = c(2,3))
-plot(mm7, which = 1:6) # no glaring violations
+plot(mm2, which = 1:6) # no glaring violations
 par(mfrow = c(1,1))
 
 
 
 ### model visualization
-# calculate partial residuals for deltaLoad
-# these are the  residuals, minus the effect of detlaLoad
-y <- residuals(mm7, type = 'partial')[, "deltaLoad"]
-
-# plot partial residuals with base R plotting
-plot(x = newDF$deltaLoad, y = y)
-
-# double check to make sure the slope for partial residual plots are the 
-# same as in the original regression
-summary(lm(y ~ newDF$deltaLoad)) 
-summary(mm7)
-
-# this is what the raw data look like
-plot(x = newDF$dLoad_nonCent, y = newDF$deltaMetR)
-
-
-fig5a <- ggplot(newDF, aes(x= dLoad_nonCent, y = y)) + 
+fig5a <- ggplot(partialMetRateDF, aes(x= deltaLoad, y = partialDeltaLoad)) + 
   geom_point(shape = 17) + 
+  geom_line(aes(x = deltaLoad, y = predictedLine_partials_deltaLoad), lty = 2, size = 0.5) +
   xlim(c(0.03, 0.12)) + 
-  labs(x = "Δ load (g)", y = "Δ Metabolic Rate partial residual" ) + 
+  labs(x = expression(Delta~"Load (g)"),
+       y = expression(Delta~"Metabolic Rate partial residual" )) + 
   #stat_smooth(method = 'lm', se = FALSE, color = "black", lty = 2, size = 0.5) + 
   scale_y_continuous(limits = c(-2.5, 5)) + 
   theme(legend.title = element_blank(), 
@@ -942,39 +926,10 @@ ggsave(filename = file.path(figDir, "fig5a.png"), width = 6.5/2, height = 2,
         plot = fig5a,
        units = "in", dpi = 500)
 
-
-
-
-# these are the  residuals, minus the effect of delta freq^2
-y <- residuals(mm7, type = 'partial')[, "deltaFrq2"]
-
-# plot partial residuals with base R plotting
-plot(x = newDF$deltaFrq2, y = y)
-
-# double check to make sure the slope for partial residual plots are the 
-# same as in the original regression
-summary(lm(y ~ newDF$deltaFrq2)) 
-
-partialPreds_deltaFreq2 <- predict(lm(y ~ newDF$deltaFrq2))
-summary(mm7)
-
-# this is what the raw data look like
-plot(x = newDF$deltaFrq2, y = newDF$deltaMetR)
-
-# save partial residuals
-partialMetRateDF <- data.frame(deltaLoad = newDF$dLoad_nonCent, 
-                               partialDeltaLoad = prDload, 
-                               deltaFreq2 = newDF$deltaFrq2, 
-                               partialDeltaFreq2 = prDfreq2, 
-                               predictedLine_partials_deltaFreq2 = partialPreds_deltaFreq2)
-
-write_csv(partialMetRateDF, 
-          file.path(dataOut, "PartialResid_MetRate_Fig5a_5b.csv"))
-
 fig5b <- ggplot(partialMetRateDF, aes(x= deltaFreq2, y = partialDeltaFreq2)) + 
   geom_point(shape = 17) + 
   xlim(c(-6*10^3, 13e3)) + 
-  labs(x = "Δ frequency^2", y = "Δ Metabolic Rate partial residual" ) + 
+  labs(x = expression(Delta~"frequency^2"), y = expression(Delta~"Metabolic Rate partial residual") ) + 
   geom_line(aes(x = deltaFreq2, y = partialPreds_deltaFreq2), 
             color = "black", lty = 2, size = 0.5) + 
   theme(legend.title = element_blank(), 
@@ -988,6 +943,26 @@ fig5b
 
 ggsave(filename = file.path(figDir, "fig5b.png"), width = 6.5/2, height = 2, 
         plot = fig5b,
+       units = "in", dpi = 500)
+
+
+
+fig5c <- ggplot(partialMetRateDF, aes(x= deltaArcLen2, y = partialDeltaArcLen2)) + 
+  geom_point(shape = 17) + 
+  #xlim(c(-6*10^3, 13e3)) + 
+  labs(x = expression(Delta~"Arc Length^2"), y = expression(Delta~"Metabolic Rate partial residual") ) + 
+  #geom_line(aes(x = deltaLoad, y = predictedLine_partials_deltaLoad), lty = 2, size = 0.5) +
+  theme(legend.title = element_blank(), 
+        legend.background = element_rect(colour = "black", size = 0.3), 
+        legend.position = c(0.8, 0.16), 
+        legend.text = element_text(size = 6), 
+        axis.text = element_text(size = 6), 
+        axis.title = element_text(size = 6), 
+        legend.key.size = unit(0.2, "cm"))  
+fig5c
+
+ggsave(filename = file.path(figDir, "fig5c.png"), width = 6.5/2, height = 2, 
+        plot = fig5c,
        units = "in", dpi = 500)
 
 ```
