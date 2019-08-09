@@ -3,7 +3,7 @@
 .Rapp.history
 
 # folders
-# /data
+/data/clipped_audio
 #/figures
 #/dataOutput
 

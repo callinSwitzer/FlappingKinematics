@@ -1,0 +1,515 @@
+---
+title: "Bumblebee wingbeat audio processing"
+author: "Callin Switzer"
+date: "7 Aug 2019"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+
+
+## re-processing audio data from flapping kinematics paper
+
+
+```{r}
+# install packages
+ipak <- function(pkg){
+  new.pkg <- pkg[!(pkg %in% installed.packages()[, "Package"])]
+  if(length(new.pkg)) install.packages(new.pkg, dependencies = TRUE)
+  sapply(pkg, require, character.only = TRUE)
+}
+
+packages <- c("tuneR", "zoo", "seewave","signal", "roll", "tidyverse")
+ipak(packages)
+
+# set ggplot theme
+theme_set(theme_classic() + 
+            theme(axis.text=element_text(colour="black"), 
+                  text=element_text(size=10)))
+
+# set  directories
+dataDir <- file.path(getwd(), "data", "clipped_audio")
+figDir <- file.path(getwd(), "figures")
+dataOut <- file.path(getwd(), "dataOutput")
+
+print(paste("last run ", Sys.time()))
+print(R.version)
+```
+
+
+```{r}
+################################################################################
+## Define functions
+################################################################################
+minmaxScale <- function(x){
+    return((((x- min(x)) /(max(x)-min(x))) - 0.5)*2)
+}
+  
+shifter <- function(x, n = 1) {
+  if (n == 0) x else c(tail(x, -n), head(x, n))
+}
+  
+ fft_calculator = function(timeSignal, log_rate){
+    # calculate fft
+    n = length(timeSignal)
+    Y = fft(timeSignal)/n
+    amplitudeAndPhase = Y[(1:(n/2))]*2 # these are complex numbers
+    
+    # calculate fft frequencies
+    k = 0:n
+    Ts = n/log_rate
+    frq = k/Ts # two side frequency range
+    frq = frq[1:(n/2)] # one side frequency range
+    
+    return(list('amplitudeAndPhase' = amplitudeAndPhase, "frq" =  frq))
+ }
+ 
+# find peaks
+# function here: https://github.com/stas-g/findPeaks/blob/master/find_peaks.R
+find_peaks <- function (x, m = 3){
+  shape <- diff(sign(diff(x, na.pad = FALSE)))
+  pks <- sapply(which(shape < 0), FUN = function(i){
+    z <- i - m + 1
+    z <- ifelse(z > 0, z, 1)
+    w <- i + m + 1
+    w <- ifelse(w < length(x), w, length(x))
+    if(all(x[c(z : i, (i + 2) : w)] <= x[i + 1])) return(i + 1) else return(numeric(0))
+  })
+  pks <- unlist(pks)
+  pks
+}
+
+is.prime <- function(n) n == 2L || all(n %% 2L:max(2,floor(sqrt(n))) != 0)
+
+
+primeFactors=function(x){
+  n=c()
+  i=2
+  r=x
+  while(prod(n)!=x){
+    if(!r%%i) {n=c(n,i);r=r/i;i=1}
+    i=i+1
+  }
+  n
+}
+
+```
+
+
+```{r}
+  
+#############################
+### check fft
+#############################
+
+
+
+
+wavFiles <- list.files(path = dataDir, pattern = "\\.wav$")
+
+# open plotting window
+#x11()
+
+# calculate powers of 2 -- up to 1 billion
+
+twoPow = sapply(X = 1:35, FUN = function(x) 2^x)
+
+
+
+
+################################################################################
+## Start loop
+################################################################################
+fileNum = 1
+
+for (fileNum in 1:length(wavFiles)){
+  z <- Sys.time() 
+
+  # Read in a portion of the audio recording
+  wave1 = readWave(file.path(dataDir, wavFiles[fileNum]), units = "seconds")#, from = 5, to = 10)
+  print(wave1)
+  is.prime(length(wave1@left))
+  primeFactors(length(wave1@left))
+  
+
+  # wave1 = cutw(wave1,f = wave1@samp.rate,  from = startcut, to = endcut, output = "Wave")
+    # get info
+  # print(wave1)
+  print(wavFiles[fileNum])
+
+  # scale
+  wave1@left = minmaxScale(wave1@left)
+  # fix clipping
+  clipPts = (abs(wave1@left) > 0.99)*1
+  
+  # refref: could convert to a single operation -- roll max
+  system.time({
+    ClipWindow = 2**11
+    
+    spredClipping = as.numeric(roll_max(as.matrix(clipPts), ClipWindow))
+    spredClipping = shifter(spredClipping, n = round(ClipWindow/2))
+    spredClipping[is.na(spredClipping)] = 0
+  })
+  
+  # system.time({
+  #   # smooth with a running average
+  #   cv = convolve(spredClipping, y = rep(1, 2**11)/2**11, type = "filter")
+  # 
+  #   ## add zeros
+  #   cv2 = c(cv, rep(0, (length(wave1@left) - length(cv))))
+  #   
+  #   # shift
+  #   spredClipping2 = shifter(cv2, -round((length(wave1@left) - length(cv))/2))
+  #   
+  # }) %>% print()
+  
+
+  system.time({
+    spredClipping2 = as.numeric(roll_mean(as.matrix(clipPts), ClipWindow))
+    spredClipping2 = shifter(spredClipping2, n = round(ClipWindow/2))
+    spredClipping2[is.na(spredClipping2)] = 0
+  })
+  
+  
+  # plot(wave1)
+  # lines(y = spredClipping2, x = (1:length(wave1@left)) / wave1@samp.rate, col = 'red')
+  
+  
+  # this adds smooth transitions
+  wave1@left = wave1@left * (1 - spredClipping2)
+  
+  #plot(wave1)
+  
+  # remove clipping
+  wave1@left = wave1@left[spredClipping <= 0]
+
+  
+  # trim length to a power of 2
+  maxless <- max(twoPow[ twoPow <= length(wave1@left) ])
+  wave1@left <- wave1@left[(length(wave1@left) - maxless + 1): (length(wave1@left)) ]
+  
+
+  #### Band pass filter ################
+  nyq = wave1@samp.rate / 2
+  filterFreq = 2000
+  
+  bf <- butter(5, c(1000/nyq, filterFreq/nyq), type="pass")
+  system.time({
+    b <- filtfilt(bf, wave1@left)
+  }) %>% print()
+  
+  
+  # downsampSig = round(seq(0, length(b), length.out = 10000))
+  #plot(b[downsampSig], x = ((1:length(b))/wave1@samp.rate)[downsampSig], type = "l")
+  
+  #listen(b, f= wave1@samp.rate)
+  
+  
+  
+  
+  # plot(y = b, x = (1:length(b))/wave1@samp.rate,  
+  #      main = "raw data, zoomed", type = "l", xlab = "time", ylab = "")
+  
+ 
+  
+  # fft_data = fft_calculator(b, wave1@samp.rate)
+  # 
+  # 
+  # amplitudeAndPhase = fft_data[["amplitudeAndPhase"]]
+  # frq = fft_data[["frq"]]
+  # downSamp = round(seq(1, length(frq), length.out = 10000))
+  # 
+  # plot(abs(amplitudeAndPhase)[downSamp], 
+  #      x = frq[downSamp], type = "l", xlab = "freq (Hz)",
+  #       ylab = "amplitude", main = "DFT spectrum", xlim = c(0, 5000))
+  
+  
+  ##################################################################
+  # hack 1: make signal look more like a sine wave -- less spiky
+  ##################################################################
+  
+  #par(mfrow=  c(3,1))
+  #install.packages("roll")
+  # calculate the rolling variance
+  # you can tune the width somewhat. 50 points seems fine here.
+  roll_window = 50
+  
+  system.time({
+    rollingVar = roll_var(as.matrix(b), width = roll_window, center = TRUE)
+    rollingVar = shifter(rollingVar, n = roll_window/2)
+    rollingVar[is.na(rollingVar)] = 0
+    
+  }) %>% print()
+  
+  
+  rollingVar = minmaxScale(rollingVar)
+  
+  
+  # plot data
+  # plot(y = rollingVar[downsampSig], 
+  #      x = ((1:length(wave1@left))/wave1@samp.rate)[downsampSig], 
+  #      main = "rolling variance", type = "l", xlab = "time (s)")
+  
+  # filter
+  rollVarFilt = 100
+  bf2 <- butter(5, c(rollVarFilt/nyq, 1000/nyq), type="pass")
+  b2 <- filtfilt(bf2, rollingVar)
+  # plot((b2*hanning(length(b2)))[downsampSig], 
+  #      x = ((1:length(b2))/wave1@samp.rate)[downsampSig], type = "l")
+  
+  
+  system.time({
+    fft_data = fft_calculator(b2*hanning(length(b2)), wave1@samp.rate)
+  }) %>% print()
+  
+  amplitudeAndPhase = fft_data[["amplitudeAndPhase"]]
+  frq = fft_data[["frq"]]
+  
+
+  ##################################################################
+  # find peaks
+  ##################################################################
+ 
+  # may need to smooth, and downsample, to speed this up.
+  # only search up to 400 Hz
+  system.time({
+    pks = find_peaks(abs(amplitudeAndPhase)[1:length(frq[frq < 300])], m = 1500)
+  })
+  
+
+  strsplit(wavFiles[fileNum], "\\.")[[1]][1]
+  png(file.path(dataDir, paste0(strsplit(wavFiles[fileNum], "\\.")[[1]][1], "_FFT.png")))
+  # plot dft spectrum
+  plot(abs(amplitudeAndPhase)[1:length(frq[frq < 500])], 
+       x = frq[1:length(frq[frq < 500])], type = "l", xlab = "freq (Hz)", 
+       ylab = "amplitude", 
+       main = paste0("DFT spectrum of rolling variance", 
+                     strsplit(wavFiles[fileNum], "\\.")[[1]][1]), 
+       xlim = c(0, 500), 
+       ylim = c(0, max(abs(amplitudeAndPhase))), 
+       col = rgb(0,0,0,0.3))
+  points(y = abs(amplitudeAndPhase)[pks],x = frq[pks], col= 'red')
+  fft_smooth = predict(smooth.spline(abs(amplitudeAndPhase)[1:length(frq[frq < 500])]
+                                     , lambda = 0.0001))$y
+  
+  lines(y = fft_smooth,
+        x = frq[1:length(frq[frq < 500])], col = 'blue')
+  pks2 = find_peaks(fft_smooth, m = 1500)
+  points(y = fft_smooth[pks2],x = frq[pks2], col= 'purple')
+
+  
+  dev.off()
+  
+  meanFrq = frq[pks][which.max(abs(amplitudeAndPhase)[pks])]
+  meanFrq2 = frq[pks2][which.max(fft_smooth[pks2])]
+  
+  print(meanFrq)
+  print(wavFiles[fileNum])
+  print(Sys.time() - z)
+  
+  
+    ## write to file:
+  if (fileNum == 1){
+      cat(c("fname","freq1", "freq2", "\n"),
+      file=file.path(dataDir, "audio_output_full_FFT.csv"),
+      sep=",",append=TRUE)
+  }
+  cat(c( wavFiles[fileNum],meanFrq,meanFrq2, "\n"),
+      file=file.path(dataDir, "audio_output_full_FFT.csv"),
+      sep=",",append=TRUE)
+
+}
+#listen(sine(178))
+
+#listen(wave1)
+```
+
+
+## re-run analysis on edited wav files
+
+```{r}
+
+wavFiles <- list.files(path = dataDir, pattern = "edited\\.wav$")
+
+
+# calculate powers of 2 -- up to 1 billion
+
+twoPow = sapply(X = 1:35, FUN = function(x) 2^x)
+
+
+
+
+################################################################################
+## Start loop
+################################################################################
+fileNums = 13 # 1:length(wavFiles)
+
+for (fileNum in fileNums ){#
+  z <- Sys.time() 
+
+  # Read in a portion of the audio recording
+  wave1 = readWave(file.path(dataDir, wavFiles[fileNum]), 
+                   units = "seconds")#, from = 5, to = 10)
+  print(wave1)
+  is.prime(length(wave1@left))
+  primeFactors(length(wave1@left))
+
+  print(wavFiles[fileNum])
+
+  # scale
+  wave1@left = minmaxScale(wave1@left)
+  # fix clipping
+  clipPts = (abs(wave1@left) > 0.99)*1
+  
+  # refref: could convert to a single operation -- roll max
+  system.time({
+    ClipWindow = 2**11
+    
+    spredClipping = as.numeric(roll_max(as.matrix(clipPts), ClipWindow))
+    spredClipping = shifter(spredClipping, n = round(ClipWindow/2))
+    spredClipping[is.na(spredClipping)] = 0
+  })
+
+
+  system.time({
+    spredClipping2 = as.numeric(roll_mean(as.matrix(clipPts), ClipWindow))
+    spredClipping2 = shifter(spredClipping2, n = round(ClipWindow/2))
+    spredClipping2[is.na(spredClipping2)] = 0
+  })
+  
+
+  
+  # this adds smooth transitions
+  wave1@left = wave1@left * (1 - spredClipping2)
+  
+  #plot(wave1)
+  
+  # remove clipping
+  wave1@left = wave1@left[spredClipping <= 0]
+
+  
+  # trim length to a power of 2
+  maxless <- max(twoPow[ twoPow <= length(wave1@left) ])
+  wave1@left <- wave1@left[(length(wave1@left) - maxless + 1): (length(wave1@left)) ]
+  
+
+  #### Band pass filter ################
+  nyq = wave1@samp.rate / 2
+  filterFreq = 2000
+  
+  bf <- butter(5, c(1000/nyq, filterFreq/nyq), type="pass")
+  system.time({
+    b <- filtfilt(bf, wave1@left)
+  }) %>% print()
+  
+ 
+  roll_window = 50
+  
+  system.time({
+    rollingVar = roll_var(as.matrix(b), width = roll_window, center = TRUE)
+    rollingVar = shifter(rollingVar, n = roll_window/2)
+    rollingVar[is.na(rollingVar)] = 0
+    
+  }) %>% print()
+  
+  
+  rollingVar = minmaxScale(rollingVar)
+
+  # filter
+  rollVarFilt = 100
+  bf2 <- butter(5, c(rollVarFilt/nyq, 1000/nyq), type="pass")
+  b2 <- filtfilt(bf2, rollingVar)
+
+  system.time({
+    fft_data = fft_calculator(b2*hanning(length(b2)), wave1@samp.rate)
+  }) %>% print()
+  
+  amplitudeAndPhase = fft_data[["amplitudeAndPhase"]]
+  frq = fft_data[["frq"]]
+  
+
+  ##################################################################
+  # find peaks
+  ##################################################################
+ 
+  # may need to smooth, and downsample, to speed this up.
+  # only search up to 400 Hz
+  system.time({
+    pks = find_peaks(abs(amplitudeAndPhase)[1:length(frq[frq < 300])], m = 1500)
+  })
+  
+
+  strsplit(wavFiles[fileNum], "\\.")[[1]][1]
+  png(file.path(dataDir, paste0(strsplit(wavFiles[fileNum], "\\.")[[1]][1], "_FFT.png")))
+  # plot dft spectrum
+  plot(abs(amplitudeAndPhase)[1:length(frq[frq < 500])], 
+       x = frq[1:length(frq[frq < 500])], type = "l", xlab = "freq (Hz)", 
+       ylab = "amplitude", 
+       main = paste0("DFT spectrum of rolling variance ", 
+                     strsplit(wavFiles[fileNum], "\\.")[[1]][1]), 
+       xlim = c(0, 500), 
+       ylim = c(0, max(abs(amplitudeAndPhase))), 
+       col = rgb(0,0,0,0.3))
+  points(y = abs(amplitudeAndPhase)[pks],x = frq[pks], col= 'red')
+  fft_smooth = predict(smooth.spline(abs(amplitudeAndPhase)[1:length(frq[frq < 500])]
+                                     , lambda = 0.0001))$y
+  
+  lines(y = fft_smooth,
+        x = frq[1:length(frq[frq < 500])], col = 'blue')
+  pks2 = find_peaks(fft_smooth, m = 1500)
+  points(y = fft_smooth[pks2],x = frq[pks2], col= 'purple')
+
+  
+  dev.off()
+  
+  meanFrq = frq[pks][which.max(abs(amplitudeAndPhase)[pks])]
+  meanFrq2 = frq[pks2][which.max(fft_smooth[pks2])]
+  
+  print(meanFrq)
+  print(wavFiles[fileNum])
+  print(Sys.time() - z)
+  
+  
+
+  cat(c( wavFiles[fileNum],meanFrq,meanFrq2, "\n"),
+      file=file.path(dataDir, "audio_output_full_FFT.csv"),
+      sep=",",append=TRUE)
+
+}
+
+
+```
+
+
+
+
+
+
+```{r}
+###############################
+## Missing fundamental Examples
+
+
+listen(sine(100))
+ts = seq(0, 0.3, length.out = 4410*3)
+
+b =  sin(500 * 2 * pi * ts ) + 
+  sin(600 * 2 * pi * ts ) + sin(700 * 2 * pi * ts ) + sin(800 * 2 * pi * ts ) + sin(400 * 2 * pi * ts )+ sin(300 * 2 * pi * ts )
+plot(ts, b, "l")
+
+listen(b, wave1@samp.rate)
+
+fft_data = fft_calculator(hanning(length(b))*b, wave1@samp.rate)
+
+
+amplitudeAndPhase = fft_data[["amplitudeAndPhase"]]
+frq = fft_data[["frq"]]
+
+plot(abs(amplitudeAndPhase), x = frq, type = "l", xlab = "freq (Hz)", 
+     ylab = "amplitude", main = "DFT spectrum", xlim = c(0, 1000))
+
+listen(sine(180))
+
+
+```
