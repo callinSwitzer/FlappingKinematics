@@ -14,7 +14,7 @@ knitr::opts_knit$set(root.dir = rprojroot::find_rstudio_root_file())
 ```
 
 
-### wing_velocitypdates from first submission
+### Updates from first submission
 
 ---
 
@@ -117,7 +117,7 @@ print(R.version)
 
 
 ```{r}
-raw_data <- read_csv(file.path(dataDir, "beeRespData_final.csv"))
+raw_data <- read_csv(file.path(dataDir, "beeRespData_freqUpdated.csv"))
 summary(raw_data)
 ```
 
@@ -126,16 +126,51 @@ summary(raw_data)
 # Data tidying
 
 ```{r}
+# old freq data
 bdta <- raw_data %>%
   # rename variables
-  rename(metabolic_rate = MetR, 
+  rename(
+         metabolic_rate = MetR, 
          mass_starved = Mstarved, 
          wing_len = wingLen, 
          mass_0 = M2,
          mass_f = MF, 
          IT_span = Itspan, 
          treatment = Treatment, 
-         bee_ID  = BeeID
+         bee_ID  = BeeID, 
+         ) %>%
+  # calculate new variables
+  mutate(
+     avg_mass = (mass_0 + mass_f)/2,
+     load = avg_mass - mass_starved,
+     perc_load = load / mass_starved * 100,
+     arc_len = (0.75 *wing_len) * (amp * (pi / 180)),
+     wing_velocity = arc_len * freq * 2,
+     force = wing_velocity^2 * S,
+     mass_spec_metabolic_rate = metabolic_rate / mass_starved,
+     IT_span_mm = IT_span * 1000, 
+
+     # convert to factor variables
+     order = as.factor(as.character(order)),
+     treatment = as.factor(as.character(treatment)),
+     bee_ID = as.factor(as.character(bee_ID))
+     )
+
+
+# new version
+bdta <- raw_data %>%
+  # rename variables
+  rename(
+         freq_old = freq,
+         metabolic_rate = MetR, 
+         mass_starved = Mstarved, 
+         wing_len = wingLen, 
+         mass_0 = M2,
+         mass_f = MF, 
+         IT_span = Itspan, 
+         treatment = Treatment, 
+         bee_ID  = BeeID, 
+         freq = freq_v2
          ) %>%
   # calculate new variables
   mutate(
@@ -215,11 +250,13 @@ newDF <- newDF %>%
 ## Fig 3a
 
 ```{r}
-# calculate maean and SD
-tapply(bdta$metabolic_rate, INDEX = bdta$treatment, function(x) return(c(mean(x), sd(x))))
+# calculate mean and SD
+tapply(bdta$metabolic_rate, INDEX = bdta$treatment, 
+       function(x) return(c(mean(x), sd(x))))
 
 
-m1 <- lmer(metabolic_rate ~ treatment * I(scale(avg_mass)) + (1|bee_ID), data = bdta)
+m1 <- lmer(metabolic_rate ~ treatment * I(scale(avg_mass)) + 
+             (1|bee_ID), data = bdta)
 summary(m1)
 
 m2 <- update(m1, .~. - treatment:I(scale(avg_mass)))
@@ -230,8 +267,6 @@ anova(m2, m1, test = "LRT")
 #######################################################
 
 # predict lines from m2
-
-
 # make dataset for Fig 3a
 fig3a_dta <- bdta %>%
   mutate(HighLowTrt = recode(.$treatment, "H" = "Heavy load",
@@ -357,14 +392,38 @@ with(bdta[bdta$treatment == "L", ], {
 ## Fig 3b
 
 ```{r}
-m1 <- lmer(force ~ treatment * avg_mass + (1|bee_ID), data = bdta)
+m1 <- lmer((force) ~ treatment * I(scale(avg_mass)) + (1|bee_ID), data = bdta)
 summary(m1)
+car::vif(m1)
+plot(m1)
+
+# diagnostics
+# qq plot
+qqnorm(resid(m1), main = "")
+qqline(resid(m1)) # good
+
+# residual plot
+plot(fitted(m1), resid(m1), xlab = "fitted", ylab = "residuals")
+abline(0,0)
+
+# QQPlot for group-level effects
+qqnorm(ranef(m1)$bee_ID[[1]], main="Normal Q-Q plot for random effects")
+qqline(ranef(m1)$bee_ID[[1]]) # looks good
+
+infl <- influence(m1, obs = TRUE)
+plot(infl, which = 'cook')
+
+m2 <- update(m1, .~. - treatment : I(scale(avg_mass)))
+anova(m2, m1, test = "LRT") 
+summary(m2)
 
 
+# refref: new data, says treatment is not significant
+m3 <- update(m2, .~. - treatment)
+summary(m3)
 
-m2 <- update(m1, .~. - treatment:avg_mass)
-anova(m2, m1, test = "LRT")
-
+m3 <- update(m2, force ~ avg_mass + (1|bee_ID))
+summary(m3)
 
 # Plot force vs. body mass + load
 fig3b_dta <- bdta %>%
@@ -376,7 +435,7 @@ fig3b_dta <- bdta %>%
 fig3b_dta <- bdta %>%
   mutate(HighLowTrt = recode(.$treatment, "H" = "Heavy load",
                        "L" = "Light load"),
-         predictedTransForce = predict(m1, re.form = NA)) %>%
+         predictedTransForce = (predict(m3, re.form = NA))) %>%
   select(avg_mass, HighLowTrt, force, predictedTransForce)
 
 # save data
@@ -386,7 +445,7 @@ fig3b_dta <- bdta %>%
 fig3b <- ggplot(fig3b_dta, aes(x = avg_mass, y = force )) +
   geom_point(aes(shape = HighLowTrt)) +
   #stat_smooth(aes(color = HighLowTrt), method = "lm", se = F, size = 0.5) +
-  geom_line(aes(y = predictedTransForce, color = HighLowTrt), size = 0.5) +
+  geom_line(aes(y = predictedTransForce), color = "black", size = 0.5) +
   labs(y = expression("Translational force proxy (m"^4 %.% ~ "s"^{-2}~ ")" ),
        x = "Total mass (g)") +
   lims(x = c(0.05,0.4)) +
@@ -417,7 +476,7 @@ dev.off()
 (summ <- summary(mod1))
 summ$r.squared
 
-mod2 <- lm(force ~ avg_mass, data =  bdta[bdta$treatment == "L", ])
+mod2 <- lm(log(force) ~ avg_mass, data =  bdta[bdta$treatment == "L", ])
 summary(mod2)
 summary(mod2)$r.squared
 # diagnostics
@@ -732,7 +791,10 @@ summary(m3)
 ## 5a change in metabolic rate vs. change in amplitude
 
 ```{r}
-mm1 <- lm((delta_metabolic_rate) ~  delta_amp + delta_freq + 
+
+
+
+mm1 <- lm(log(delta_metabolic_rate) ~  delta_amp + delta_freq +  
             delta_perc_load + IT_span_mm + order_1, data = newDF)
 car::vif(mm1)
 summary(mm1)
@@ -751,7 +813,7 @@ summary(mm3)
 mm4 <- update(mm3, .~. - IT_span_mm)
 summary(mm4)
 
-mm5 <- update(mm4, .~. - delta_freq)
+mm5 <- update(mm4, .~. - order_1)
 anova(mm5, mm4)
 summary(mm5)
 par(mfrow = c(2,3))
@@ -815,9 +877,9 @@ fig5a <- ggplot(newDF, aes(x = delta_perc_load, y = delta_metabolic_rate)) +
   scale_shape_manual(values = c(6, 17))
 fig5a
 
-ggsave(filename = file.path(figDir, "fig5a.png"), width = 6.5/2, height = 2,
-        plot = fig5a,
-       units = "in", dpi = 500)
+# ggsave(filename = file.path(figDir, "fig5a.png"), width = 6.5/2, height = 2,
+#         plot = fig5a,
+#        units = "in", dpi = 500)
 
 fig5b <- ggplot(newDF, aes(x = delta_amp, y = delta_metabolic_rate)) +
   geom_point(aes(shape = order_1)) +
@@ -835,9 +897,9 @@ fig5b <- ggplot(newDF, aes(x = delta_amp, y = delta_metabolic_rate)) +
   scale_shape_manual(values = c(6, 17))
 fig5b
 
-ggsave(filename = file.path(figDir, "fig5b.png"), width = 6.5/2, height = 2,
-        plot = fig5b,
-       units = "in", dpi = 500)
+# ggsave(filename = file.path(figDir, "fig5b.png"), width = 6.5/2, height = 2,
+#         plot = fig5b,
+#        units = "in", dpi = 500)
 
 
 
@@ -845,6 +907,7 @@ fig5c <- ggplot(newDF, aes(x = delta_freq, y = delta_metabolic_rate)) +
   geom_point(aes(shape = order_1)) +
   labs(x = expression(Delta~" frequencey (Hz)"),
        y = expression(Delta~"Metabolic Rate" )) +
+    geom_line(aes( x = delta_freq, y = exp(predict(mm5)))) + 
   #stat_smooth(method = 'lm', se = FALSE, color = "black", lty = 2, size = 0.5) +
   #scale_y_continuous(limits = c(-2.5, 5)) +
   theme(legend.title = element_blank(),
@@ -857,9 +920,9 @@ fig5c <- ggplot(newDF, aes(x = delta_freq, y = delta_metabolic_rate)) +
   scale_shape_manual(values = c(6, 17))
 fig5c
 
-ggsave(filename = file.path(figDir, "fig5c.png"), width = 6.5/2, height = 2,
-        plot = fig5c,
-       units = "in", dpi = 500)
+# ggsave(filename = file.path(figDir, "fig5c.png"), width = 6.5/2, height = 2,
+#         plot = fig5c,
+#        units = "in", dpi = 500)
 
 ```
 
@@ -882,8 +945,11 @@ m33= lmer(metabolic_rate ~ I((IT_span_mm)) + I((perc_load)) + I((perc_load)^2) +
 summary(m33)
 
 
-plot(newDF$delta_metabolic_rate ~ newDF$delta_perc_load)
-plot(newDF$delta_amp)
+plot(bdta$metabolic_rate ~ bdta$perc_load)
+points(predict(m33, re.form = NA) ~ bdta$perc_load, col= 'red')
+
+
+plot(freq~amp, data = bdta[bdta$treatment == "H",])
 
 ```
 
@@ -896,7 +962,7 @@ plot(newDF$delta_amp)
 
 
 
-################# end or exploration area
+################# end of exploration area
 
 
 

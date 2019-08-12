@@ -29,32 +29,37 @@ print(R.version)
 
 
 
-audFile <- read_csv(file.path(dataDir,  "audio_output_full_FFT.csv")) %>%
+audFile <- read_csv(file.path(dataDir,  "audio_output_full_FFT3.csv")) %>%
   mutate(
   BeeID = substr(fname, 0, 3),
   Treatment = substr(fname, 4, 4) 
   ) %>%
+  rename(freq_v2 = freq2) %>%
   group_by(BeeID)
 audFile
 
-plot(audFile$smoothEstimateFreq, audFile$spikyEstimateFreq)
+# smooth vs. spiky frequency estimate
+# freq_v2 is the smoothed DFT estimate
+plot(audFile$freq_v2, audFile$freq1)
 abline(0, 1)
 
-## REFREF: here
 
 
-combinedAud = full_join(audFile, audFile2, by = c("fname", "BeeID", "Treatment"))
-combinedAud <- combinedAud %>%
-  select(-fname)
+smoothFreq = audFile %>%
+  select(c(BeeID, Treatment, freq_v2))
 
-spread(combinedAud, c("BeeID"), "Treatment", )
-
-plot(combinedAud$freq.x, type = 'l')
-plot(combinedAud$freq.y, type = 'l')
-
-plot(combinedAud$freq.x,combinedAud$freq.y, xlim = c(150, 250))
-lines(0:300, 0:300)
+smoothFreq[smoothFreq$Treatment == "L", "Treatment"] = "H"
+smoothFreq[smoothFreq$Treatment == "U", "Treatment"] = "L"
 
 
-with(combinedAud, plot(freq.x, freq.y))
+# combine with final data
+fdata  = read_csv(file.path(getwd(), "data", "beeRespData_final.csv")) 
+data2 = full_join(fdata, smoothFreq, by = c("BeeID", "Treatment"))
 
+plot(data2$freq, data2$freq_v2)
+abline(0, 1)
+
+
+t.test(data2$freq, data2$freq_v2, paired = TRUE)
+
+write_csv(data2, file.path(getwd(), "data", "beeRespData_freqUpdated.csv"))
