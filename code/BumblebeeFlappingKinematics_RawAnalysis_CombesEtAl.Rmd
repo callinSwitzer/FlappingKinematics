@@ -476,7 +476,7 @@ dev.off()
 (summ <- summary(mod1))
 summ$r.squared
 
-mod2 <- lm(log(force) ~ avg_mass, data =  bdta[bdta$treatment == "L", ])
+mod2 <- lm((force) ~ avg_mass, data =  bdta[bdta$treatment == "L", ])
 summary(mod2)
 summary(mod2)$r.squared
 # diagnostics
@@ -491,142 +491,12 @@ dev.off()
 
 # Fig 4: Change in freq and amplitude
 
-### REFREF: experimental approach
-## Wingbeat Freq -- mixed model approach
-
-```{r}
-
-# how many trials increased frequency
-newDF$FreqHigherInHeavy <- (newDF$freq_H - newDF$freq_L) > 0
-summary(newDF$FreqHigherInHeavy)
-sum(newDF$FreqHigherInHeavy) / nrow(newDF)
-
-# calculate mean + sd for each treatment
-tapply(bdta$freq, INDEX = bdta$treatment, function(x) c(mean(x), sd(x)))
-
-# find treatment order for bees that increased frequency
-tapply(newDF$FreqHigherInHeavy, INDEX = newDF$order_1, summary)
-
-
-# make a full model with all two-way interactions
-# Note that IT_span is in mm -- this helps with convergence during model optimization
-m1 <- lmer(freq ~  (IT_span_mm +  order + load)^2 + (1|bee_ID), data = bdta)
-summary(m1)
-
-
-### LRT's for interactions
-m2.0 <- update(m1, .~. - IT_span_mm:order )
-anova(m1, m2.0)
-summary(m2.0)
-
-
-m2.1 <- update(m2.0,.~. - order:load)
-anova(m2.0, m2.1)
-summary(m2.1)
-
-
-m2.2 <- update(m2.1, .~. - IT_span_mm:load)
-anova(m2.1, m2.2) ## drop all interactions
-
-summary(m2.2)
-
-
-# renaming model to simplify later typing
-m2 <- m2.2
-
-##### LRTs for main effects
-## treatment Order
-m3 <- update(m2, .~. - order)
-anova(m2, m3, test = "Chi")
-
-# LRT for size
-m4 <- update(m2, .~. - IT_span_mm)
-anova(m2, m4)
-
-# LRT for treatment (load)
-m5 <- update(m2, .~. - treatment)
-anova(m2, m5)
-
-# summarize final model for paper
-summary(m2)
-anova(m2, type = 2)
-
-# write output
-summary(m2)$coefficients
-# write.csv(summary(m2)$coefficients, file.path(dataOut, "FreqCoefs_Trtwing_velocityLVsL.csv" ))
-
-
-
-# diagnostics
-# qq plot
-qqnorm(resid(m2), main = "")
-qqline(resid(m2)) # good
-
-# residual plot
-plot(fitted(m2), resid(m2), xlab = "fitted", ylab = "residuals")
-abline(0,0)
-
-
-# QQPlot for group-level effects
-qqnorm(ranef(m2)$bee_ID[[1]], main="Normal Q-Q plot for random effects")
-qqline(ranef(m2)$bee_ID[[1]]) # looks good
-
-
-m2 <- lmer(freq ~ IT_span_mm + order + load + (1|bee_ID), data = bdta)
-infl <- influence(m2, obs = TRUE)
-plot(infl, which = 'cook')
-
-bdta %>%
-  mutate(Trt2 = recode(.$treatment, "H" = "Heavy load",
-                       "L" = "Light load"),
-         order2 = recode(order, "1" = "First trial",
-                                  "2" = "Second trial")) %>%
-ggplot(aes(x = order2, y = freq)) +
-  geom_point(aes(color = load)) + 
-  labs(x = "Trial num", y="Wingbeat Frequency") + 
-  scale_color_viridis_c()
-
-plot(bdta$load, bdta$freq)
-
-
-
-```
-
-
-
-```{r}
-
-### refref: LMER
-m1 <- lmer(bdta$amp ~ I(scale(bdta$load)) + I(scale(bdta$IT_span)) + bdta$order + (1|bdta$bee_ID))
-summary(m1)
-
-m2 <- lmer(bdta$amp ~ I(scale(bdta$load)) + I(scale(bdta$IT_span)) + (1|bdta$bee_ID))
-summary(m2)
-
-m2 <- lmer(bdta$amp ~ I(scale(bdta$load)) + (1|bdta$bee_ID))
-summary(m2)
-
-
-plot(bdta$amp ~ I(scale(bdta$load)) )
-######
-
-```
-
-############################## END OF EXPERIMENTAL PART ################################
-
-
-
-
-
-
-### Fig 4
-
 ### 4a: Change in %load vs. change in amplitude
 
 ```{r}
 
 # fit full model
-m1 <- lm(delta_amp ~  (I(scale(delta_perc_load)) +  IT_span_mm + order_1)^2, data = newDF)
+m1 <- lm(delta_amp ~  (I(scale(delta_perc_load)) +  I(scale(IT_span_mm)) + order_1)^2, data = newDF)
 
 
 summary(m1)
@@ -634,18 +504,17 @@ car::vif(m1) # too high
 
 
 # remove variables because of high VIF
-m2 <- update(m1, .~. - IT_span_mm:I(scale(delta_perc_load)))
+m2 <- update(m1, .~. -  I(scale(IT_span_mm)):order_1)
 car::vif(m2)
+# now VIF is okay
 summary(m2)
 
-m3 <- update(m2, .~. - IT_span_mm:order_1)
+m3 <- update(m2, .~. - I(scale(delta_perc_load)):order_1)
 summary(m3)
-car::vif(m3)
 anova(m2, m3)
 
-# now VIF is okay
 
-m4 <- update(m3, .~. - I(scale(delta_perc_load)):order_1)
+m4 <- update(m3, .~. - I(scale(delta_perc_load)):I(scale(IT_span_mm)))
 anova(m3, m4)
 summary(m4)
 
@@ -653,13 +522,19 @@ m5 <- update(m4, .~. - order_1)
 anova(m4,m5)
 summary(m5)
         
-m6 <- update(m5, .~ + delta_perc_load)
-summary(m6) # final model for paper
+m6 <- update(m5, .~. -I(scale(IT_span_mm)) )
+summary(m6) 
 
+# final model for paper
+m6 <- update(m6, .~ delta_perc_load)
+summary(m6)
+ 
+# diagnostics
+par(mfrow = c(2,3))
+plot(m6, which = 1:6)
+par(mfrow = c(1,1))
 
 # Note that the t-stat^2 is the same as a partial f-test
-
-
 
 ### model visualization -- no need to use partial residuals, since 
 ### there is only one predictor
@@ -688,12 +563,12 @@ fig4a
 ```
 
 
-### Change in %load vs. change in amplitude
+### change in freq vs. delta perc load
 
 ```{r}
 
 # fit full model
-m1 <- lm(delta_freq ~  (I(scale(delta_perc_load)) +  IT_span_mm + order_1)^2, data = newDF)
+m1 <- lm(delta_freq ~  (I(scale(delta_perc_load)) +  I(scale(IT_span_mm)) + order_1)^2, data = newDF)
 
 
 summary(m1)
@@ -701,28 +576,31 @@ car::vif(m1) # too high
 
 
 # remove variables because of high VIF
-m2 <- update(m1, .~. - IT_span_mm:I(scale(delta_perc_load)))
+m2 <- update(m1, .~. - I(scale(IT_span_mm)):order_1)
 car::vif(m2)
 summary(m2)
 
-m3 <- update(m2, .~. - IT_span_mm:order_1)
+m3 <- update(m2, .~. -I(scale(delta_perc_load)):order_1)
 summary(m3)
-car::vif(m3)
 anova(m2, m3)
 
-# now VIF is okay
 
-m4 <- update(m3, .~. - I(scale(delta_perc_load)):order_1)
+m4 <- update(m3, .~. - I(scale(delta_perc_load)):I(scale(IT_span_mm)))
 anova(m3, m4)
-car::vif(m4)
 summary(m4)
 
-m5 <- update(m4, .~. - IT_span_mm)
+m5 <- update(m4, .~. - I(scale(IT_span_mm)))
 anova(m4,m5)
 summary(m5)
         
 m6 <- update(m5, .~. - I(scale(delta_perc_load)))
-summary(m6) # final model for paper
+# final model for paper
+summary(m6) 
+
+# diagnostics
+par(mfrow = c(2,3))
+plot(m6, which = 1:6)
+par(mfrow = c(1,1))
 
 
 
@@ -752,34 +630,7 @@ fig4b
 #         plot = fig4b,
 #        units = "in", dpi = 500)
 
-
 ```
-
-
-
-### REFREF: lmer for metabolic rate
-
-```{r}
-m1 <- lmer(metabolic_rate ~ amp + freq + perc_load + order + IT_span_mm +  (1|bee_ID), data = bdta)
-summary(m1)
-car::vif(m1)
-
-m1.1 <- update(m1, .~. - order)
-summary(m1.1) 
-
-m2 <- update(m1.1, .~. - amp)
-summary(m2)
-anova(m1, m2)
-
-m3 <- update(m2, .~. - amp)
-anova(m2, m3)
-
-summary(m3)
-
-```
-
-
-
 
 
 
@@ -792,72 +643,36 @@ summary(m3)
 
 ```{r}
 
-
-
 mm1 <- lm(log(delta_metabolic_rate) ~  delta_amp + delta_freq +  
             delta_perc_load + IT_span_mm + order_1, data = newDF)
 car::vif(mm1)
 summary(mm1)
 
-################################################################
-## if you do the model, with regular backward selection
-## you get this: 
-mm2 <- update(mm1, .~. - delta_amp)
-anova(mm1, mm2)
-summary(mm2) 
-car::vif(mm2)
-
-mm3 <- update(mm2, .~. - delta_perc_load)
-summary(mm3)
-
-mm4 <- update(mm3, .~. - IT_span_mm)
-summary(mm4)
-
-mm5 <- update(mm4, .~. - order_1)
-anova(mm5, mm4)
-summary(mm5)
-par(mfrow = c(2,3))
-plot(mm5, which = 1:6) # no glaring violations
-par(mfrow = c(1,1))
-
-######################################################################
-
 
 
 ######################################################################
-## if you make a priori decision to leave amp and freq and 
-#  in the model, you get this:
+##  a priori decision to leave amp and freq in the model
 
-mm2 <- update(mm1, .~. - IT_span_mm)
+mm2 <- update(mm1, .~. - delta_perc_load)
 anova(mm1, mm2)
 summary(mm2) 
-car::vif(mm2)
 
-mm3 <- update(mm2, .~. - delta_perc_load)
+
+mm3 <- update(mm2, .~. - order_1)
 summary(mm3)
 anova(mm3, mm2)
 
-mm4 <- update(mm3, .~. - order_1)
-summary(mm4)
+mm4 <- update(mm3, .~. - IT_span_mm)
+summary(mm4) # final model for paper
 anova(mm3, mm4)
 
+
+mm5 <- update(mm4, .~. - delta_amp)
+summary(mm5)
 
 par(mfrow = c(2,3))
 plot(mm4, which = 1:6) # no glaring violations
 par(mfrow = c(1,1))
-######################################################################
-
-## What it means: It could be that changes in freq cause changes in metabolic 
-## rate, or that order causes changes in metabolic rate. With these data, 
-## we're not able to untangle order and change in freq.
-
-mmXX <- lm(delta_metabolic_rate ~   delta_freq + order_1, data = newDF)
-car::vif(mmXX)
-summary(mmXX)
-
-######################################################################
-
-
 
 
 ### model visualization
@@ -925,388 +740,6 @@ fig5c
 #        units = "in", dpi = 500)
 
 ```
-
-
-## REFREF: 
-
-################## EXPLORATION AREA
-```{r}
-
-m11 = lmer(metabolic_rate ~ I(scale(IT_span_mm)) + I(scale(IT_span_mm)^2)+ I(scale(perc_load)) + I(scale(perc_load)^2) + (1|bee_ID), data = bdta)
-summary(m11)
-
-m22 = lmer(metabolic_rate ~ I(scale(IT_span_mm)) + I(scale(perc_load)) + I(scale(perc_load)^2) + (1|bee_ID), data = bdta)
-summary(m22)
-
-car::vif(m11)
-
-
-m33= lmer(metabolic_rate ~ I((IT_span_mm)) + I((perc_load)) + I((perc_load)^2) + (1|bee_ID), data = bdta)
-summary(m33)
-
-
-plot(bdta$metabolic_rate ~ bdta$perc_load)
-points(predict(m33, re.form = NA) ~ bdta$perc_load, col= 'red')
-
-
-plot(freq~amp, data = bdta[bdta$treatment == "H",])
-
-```
-
-
-
-
-
-
-
-
-
-
-################# end of exploration area
-
-
-
-
-#  modeled the change in metabolic rate per 1% of additional loading
-
-```{r}
-summary(newDF$avg_perc_load)
-
-newDF <- within(newDF, {dmr_dpl = delta_metabolic_rate / delta_perc_load})
-plot(delta_metabolic_rate  ~ dmr_dpl, data = newDF)
-
-mod1 <- lm(dmr_dpl  ~ avg_perc_load + order_1 + IT_span, data = newDF)
-summary(mod1)
-
-mod2 <- update(mod1, .~. - IT_span)
-anova(mod1, mod2) # remove IT_span
-summary(mod2)
-
-mod3 <- update(mod2, .~. - order_1)
-anova(mod2, mod3) # remove order
-
-
-summary(mod3) # final model for paper
-# copy to clipboard, to paste into excel
-write.table(data.frame(summary(mod3)$coef),"clipboard",sep="\t")
-
-
-
-# get p-values for avg_perc_load and order
-anova(mod2, update(mod3, .~. - avg_perc_load)) # p-value for avg perc load
-
-# plot(I(delta_metabolic_rate)  ~ avg_perc_load, data = newDF)
-# plot(I(delta_metabolic_rate / avg_perc_load)  ~ delta_metabolic_rate, data = newDF)
-
-car::scatterplotMatrix(newDF[, c("avg_perc_load", "delta_metabolic_rate", "IT_span")])
-car::vif(mod1)  # looks fine
-
-
-par(mfrow = c(2,2))
-plot(mod3) # possible nonlinear trend in residuals
-
-plot(mod3, which = 4)
-
-# update model to add a non-linear term
-newDF <- within(newDF, {avg_perc_load_cent = as.numeric(scale(newDF$avg_perc_load, center = TRUE, scale = FALSE))})
-newDF$apl_cent2 <- with(newDF, avg_perc_load_cent^2)
-
-m11 <- lm(dmr_dpl  ~ avg_perc_load_cent  + apl_cent2 + order_1 + IT_span, data = newDF)
-summary(m11)
-car::vif(m11) # vif is much better with centered variables
-
-m11a <- update(m11, .~. - IT_span)
-anova(m11, m11a) # remove IT_span
-
-
-m11b <- update(m11a, .~. - apl_cent2)
-anova(m11a, m11b) # drop squared term
-summary(m11b)
-
-m11c <- update(m11b, .~. -order_1 )
-anova(m11b, m11c) # remove order_1
-
-summary(m11c) # final model for paper
-
-## visualize model for delta_metabolic_rateate/avg_perc_loading
-
-par(mfrow = c(1,1))
-plot(dmr_dpl  ~ avg_perc_load, col = factor(order_1), data = newDF, pch = 20)
-
-ndf <- data.frame(avg_perc_load_cent = seq(min(newDF$avg_perc_load_cent), max(newDF$avg_perc_load_cent), length.out = 200),
-                  order_1 = as.factor(rep(c("loadedFirst", "loadedSecond"), 100)))
-
-ndf$apl_cent2 <- ndf$avg_perc_load_cent^2
-
-ndf$avg_perc_load <- ndf$avg_perc_load_cent + mean(newDF$avg_perc_load)
-predDF <- data.frame(preds = predict(m11c, newdata = ndf), ndf)
-
-
-Fig6aDF <- newDF %>%
-  mutate(load_order = recode(order_1, "loadedFirst" = "Heavy -> Light",
-                             "loadedSecond" = "Light -> Heavy")) %>%
-  mutate(predictedDeltametabolic_rateate_dpl = predict(m11c),
-          delta_metabolic_rateate_dpl = dmr_dpl) %>%
-  select(avg_perc_load, delta_metabolic_rateate_dpl, load_order, predictedDeltametabolic_rateate_dpl)
-
-
-
-ggplot(Fig6aDF, aes(x = avg_perc_load, y = delta_metabolic_rateate_dpl)) +
-     geom_point(aes(color = load_order, shape = load_order)) +
-     geom_line(aes(x = avg_perc_load, y = predictedDeltametabolic_rateate_dpl)) +
-     labs(x = "Average load (% bodymass)",
-          y = "Change in Metabolic Rate (mL CO2 / hr) / \n Change in load (% bodymass)") +
-     scale_color_viridis_d( name = "Order", end = 0.8) +
-  theme(legend.title = element_blank(),
-        legend.background = element_rect(colour = "black", size = 0.3),
-        legend.position = c(0.8,0.8),
-        legend.text = element_text(size = 6),
-        axis.text = element_text(size = 6),
-        axis.title = element_text(size = 6),
-        legend.key.size = unit(0.2, "cm"))  +
-  scale_shape_manual(name = "Order", values = c(25, 24))
-
-ggsave(filename = file.path(figDir, "fig6a.png"), width = 6.5/2, height = 2,
-       units = "in", dpi = 500)
-
-
-# Save data for 6a
-write_csv(Fig6aDF, file.path(dataOut, "Fig6a_data.csv"))
-
-```
-
-
-
-## refref: "When we modeled the change in metabolic rate per 1% of additional loading, we found that average percent loading across both trials (which varied from 35.3% to 79.8%) significantly predicted Δ metabolic rate per 1% added load (avg. % load, p = 0.00017; Table S5), but bee size and treatment order did not. The final model suggests that the increase in metabolic rate per 1% added load becomes smaller as bees are more heavily loaded on average (Fig. 6A). When we modeled the change in frequency2 per 1% of additional loading, we found a significant non-linear trend in the diagnostic plots, so we refit a model with an additional predictor of average percent load2. Our final model included average percent load, average percent load2, and order as significant predictors (avg. % load, p = 0.0011; (avg. % load)2, p = 0.020; order, p = 0.00022; Table S6).
-
-
-```{R}
-plot(delta_perc_load ~ avg_perc_load, data = newDF)
-
-
-```
-
-
-# (DeltaFrq^2/delta_perc_load) ~ avg_perc_load + order_1 + IT_span
-
-```{r}
-newDF <- within(newDF, {df2_dpl = deltaFrq2 / delta_perc_load})
-
-mod1_f <- lm(deltaFrq2  ~  avg_perc_load + order_1 + IT_span, data = newDF)
-summary(mod1_f)
-
-mod2_f <- update(mod1_f, .~. - IT_span)
-anova(mod1_f, mod2_f) # remove IT_span
-
-summary(mod2_f) # not final model for paper
-
-# get p-values for avg_perc_load
-anova(mod2_f,  update(mod2_f, .~. - order_1)) # p-value for order
-
-par(mfrow = c(2,2))
-plot(mod2_f) # possible non-linearity in residuals
-plot(mod2_f, which = 4)
-
-
-# update model to add a non-linear term
-m22 <- lm(df2_dpl  ~ avg_perc_load_cent  + apl_cent2 + order_1 + IT_span, data = newDF)
-summary(m22)
-car::vif(m22) # vif is much better with centered variables
-
-m22a <- update(m22, .~. - IT_span)
-anova(m22, m22a) # remove IT_span
-
-summary(m22a)
-par(mfrow = c(2,2))
-plot(m22a) # residuals look better, though slight fan shape
-
-plot(m22a, which = 4) ## row 22 looks highly influential
-nd22 <- newDF[-22, ]
-m22s <- lm(df2_dpl  ~ avg_perc_load_cent  + apl_cent2 + order_1, data = nd22)
-summary(m22s) # no major change when we remove obs num 22
-plot(m22s, which = 4)
-
-summary(m22a) # final model for paper
-# copy to clipboard, to paste into excel
-write.table(data.frame(summary(m22a)$coef),"clipboard",sep="\t")
-
-
-## visualize model for delta_metabolic_rateate/avg_perc_loading
-
-ndf <- data.frame(avg_perc_load_cent = seq(min(newDF$avg_perc_load_cent), max(newDF$avg_perc_load_cent), length.out = 200),
-                  order_1 = as.factor(rep(c("loadedFirst", "loadedSecond"), 100)))
-
-ndf$apl_cent2 <- ndf$avg_perc_load_cent^2
-
-ndf$apl <- ndf$avg_perc_load_cent + mean(newDF$avg_perc_load)
-
-
-predDF <- data.frame(preds = predict(m22a, newdata = ndf, se = TRUE), ndf)
-predDF<- mutate(predDF,
-                            load_order = recode(order_1,
-                                                "loadedFirst" = "Heavy -> Light",
-                             "loadedSecond" = "Light -> Heavy"))
-
-par(mfrow = c(1,1))
-plot(df2_dpl  ~ avg_perc_load, col = factor(order_1), data = newDF, pch = 20)
-
-
-
-
-ggplot(newDF, aes(x = avg_perc_load, y = df2_dpl)) +
-     geom_point(aes(color = order_1),shape = 17) +
-     geom_point(aes(size = bee_ID == "E42")) +  # show the influential point
-     geom_line(data = predDF, aes(x = apl, y = preds.fit, color = order_1)) +
-     # geom_line(data = predDF, aes(x = apl, y = preds.fit + 1.96*preds.se.fit, color = order_1), lty = 2) +
-     # geom_line(data = predDF, aes(x = apl, y = preds.fit - 1.96*preds.se.fit, color = order_1), lty = 2) +
-     labs(x = "Average load (% bodymass)",
-          y = "Change in wingbeat freq^2 (hz^2) / \n Change in load (% bodymass)") +
-     scale_color_viridis_d( name = "Order",end = 0.8) +
-     theme(legend.position = c(0.8,0.8))
-
-
-newDF %>%
-  mutate(load_order = recode(order_1, "loadedFirst" = "Heavy -> Light",
-                             "loadedSecond" = "Light -> Heavy")) %>%
-ggplot( aes(x = avg_perc_load, y = df2_dpl)) +
-     geom_point(aes(color = load_order, shape = load_order )) +
-     geom_line(data = predDF, aes(x = apl, y = preds.fit, color = load_order, lty = load_order)) +
-     labs(x = "Average load (% bodymass)",
-          y = "Change in wingbeat freq^2 (hz^2) / \n Change in load (% bodymass)") +
-     scale_color_viridis_d( name = "Order", end = 0.8) +
-     theme(legend.title = element_blank(),
-        legend.background = element_rect(colour = "black", size = 0.3),
-        legend.position = c(0.8,0.8),
-        legend.text = element_text(size = 6),
-        axis.text = element_text(size = 6),
-        axis.title = element_text(size = 6),
-        legend.key.size = unit(0.2, "cm"))  +
-  scale_shape_manual(name = "Order", values = c(25, 24)) +
-  scale_linetype_manual(name = "Order", values = c(2,1))
-
-
-ggsave(filename = file.path(figDir, "fig6b.png"), width = 6.5/2, height = 2,
-       units = "in", dpi = 500)
-
-## save line as csv file
-predDF_small <- predDF %>%
-  mutate(predictedLine = preds.fit,
-         avg_perc_load = apl,
-         load_order = recode(order_1, "loadedFirst" = "Heavy -> Light",
-                             "loadedSecond" = "Light -> Heavy")) %>%
-  select(avg_perc_load, load_order, predictedLine)
-
-write_csv(predDF_small, file.path(dataOut, "Fig6b_PredictedLine.csv"))
-
-newDF_6b <- newDF %>%
-  mutate(avg_perc_load = avg_perc_load,
-         delta_freq2_perc_load = df2_dpl,
-        load_order = recode(order_1, "loadedFirst" = "Heavy -> Light",
-                             "loadedSecond" = "Light -> Heavy")) %>%
-  select(avg_perc_load, delta_freq2_perc_load, load_order)
-
-write_csv(newDF_6b, file.path(dataOut, "Fig6b_dataPoints.csv"))
-
-
-# double check data to make sure I saved the right data
-ggplot(newDF_6b, aes(x = avg_perc_load, y = delta_freq2_perc_load)) +
-     geom_point(aes(color = load_order, shape = load_order )) +
-     geom_line(data = predDF_small, aes(x = avg_perc_load, y = predictedLine, color = load_order, lty = load_order)) +
-     labs(x = "Average load (% bodymass)",
-          y = "Change in wingbeat freq^2 (hz^2) / \n Change in load (% bodymass)") +
-     scale_color_viridis_d( name = "Order", end = 0.8) +
-     theme(legend.title = element_blank(),
-        legend.background = element_rect(colour = "black", size = 0.3),
-        legend.position = c(0.8,0.8),
-        legend.text = element_text(size = 6),
-        axis.text = element_text(size = 6),
-        axis.title = element_text(size = 6),
-        legend.key.size = unit(0.2, "cm"))  +
-  scale_shape_manual(name = "Order", values = c(25, 24)) +
-  scale_linetype_manual(name = "Order", values = c(2,1))
-
-
-```
-
-
-# (Deltaarc_len^2/deltaprecent_load) ~ avg_perc_load + order_1 + IT_span
-
-```{r}
-newDF <- within(newDF, {da2_dpl = deltaarc_len2 / delta_perc_load})
-
-mod1_a <- lm(da2_dpl  ~ avg_perc_load + order_1 + IT_span, data = newDF)
-summary(mod1_a) # P-values for original model
-# copy to clipboard, to paste into excel
-write.table(as.data.frame(summary(mod1_a)$coef),"clipboard",sep="\t", row.names = TRUE)
-
-
-mod2_a <- update(mod1_a, .~. - avg_perc_load)  # I also checked for a squared term in this model (code not shown)
-anova(mod1_a, mod2_a) # remove avg_perc_load
-
-summary(mod2_a)
-
-
-mod2_b <- update(mod2_a, .~. - IT_span)
-anova(mod2_a, mod2_b)  # remove size
-summary(mod2_b)
-
-mod2c <- update(mod2_b, .~. - order_1)
-anova(mod2c, mod2_b) # remove order
-
-summary(mod2c) # final mod for paper
-# copy to clipboard, to paste into excel
-write.table(as.data.frame(summary(mod2c)$coef),"clipboard",sep="\t", row.names = TRUE)
-
-par(mfrow = c(2,2))
-plot(mod2_a)
-
-plot(mod2_a, which = 4)
-
-# visualize model
-ndf <- data.frame(avg_perc_load_cent = seq(min(newDF$avg_perc_load_cent),
-                                         max(newDF$avg_perc_load_cent), length.out = 200),
-                  order_1 = as.factor(rep(c("loadedFirst", "loadedSecond"), 100)))
-
-ndf$apl_cent2 <- ndf$avg_perc_load_cent^2
-
-ndf$avg_perc_load <- ndf$avg_perc_load_cent + mean(newDF$avg_perc_load)
-
-predDF <- data.frame(preds = predict(mod2c, newdata = ndf, se = TRUE), ndf)
-
-par(mfrow = c(1,1))
-plot(da2_dpl  ~ avg_perc_load, col = factor(order_1), data = newDF, pch = 20)
-
-fig6cDF <- newDF %>%
-  mutate(load_order = recode(order_1, "loadedFirst" = "Heavy -> Light",
-                             "loadedSecond" = "Light -> Heavy"),
-         deltaarc_lenen2_delta_load_centered = da2_dpl) %>%
-  select(avg_perc_load, load_order, deltaarc_lenen2_delta_load_centered)
-
-write_csv(fig6cDF, file.path(dataOut, "Fig6c_dataPoints.csv"))
-
-
-ggplot(fig6cDF, aes(x = avg_perc_load, y = deltaarc_lenen2_delta_load_centered)) +
-     geom_point(aes(color = load_order, shape = load_order)) +
-     labs(x = "Average load (% bodymass)",
-          y = "Change in arc length^2 (radians^2) /
-          Change in load (% bodymass)") +
-     ylim(c(0, 4.5e-6)) +
-     scale_color_viridis_d( name = "Order", end = 0.8) +
-     theme(legend.title = element_blank(),
-        legend.background = element_rect(colour = "black", size = 0.3),
-        legend.position = c(0.8,0.8),
-        legend.text = element_text(size = 6),
-        axis.text = element_text(size = 6),
-        axis.title = element_text(size = 6),
-        legend.key.size = unit(0.3, "cm"))  +
-    scale_shape_manual(name = "Order", values = c(25, 24))
-
-ggsave(filename = file.path(figDir, "fig6c.png"), width = 6.5/2, height = 2,
-       units = "in", dpi = 500)
-
-
-```
-
 
 
 # Session Info
