@@ -126,38 +126,7 @@ summary(raw_data)
 # Data tidying
 
 ```{r}
-# old freq data
-bdta <- raw_data %>%
-  # rename variables
-  rename(
-         metabolic_rate = MetR, 
-         mass_starved = Mstarved, 
-         wing_len = wingLen, 
-         mass_0 = M2,
-         mass_f = MF, 
-         IT_span = Itspan, 
-         treatment = Treatment, 
-         bee_ID  = BeeID, 
-         ) %>%
-  # calculate new variables
-  mutate(
-     avg_mass = (mass_0 + mass_f)/2,
-     load = avg_mass - mass_starved,
-     perc_load = load / mass_starved * 100,
-     arc_len = (0.75 *wing_len) * (amp * (pi / 180)),
-     wing_velocity = arc_len * freq * 2,
-     force = wing_velocity^2 * S,
-     mass_spec_metabolic_rate = metabolic_rate / mass_starved,
-     IT_span_mm = IT_span * 1000, 
-
-     # convert to factor variables
-     order = as.factor(as.character(order)),
-     treatment = as.factor(as.character(treatment)),
-     bee_ID = as.factor(as.character(bee_ID))
-     )
-
-
-# new version
+# new frequency data
 bdta <- raw_data %>%
   # rename variables
   rename(
@@ -261,6 +230,12 @@ summary(m1)
 
 m2 <- update(m1, .~. - treatment:I(scale(avg_mass)))
 anova(m2, m1, test = "LRT")
+
+
+# model for paper with unscaled variables
+m1 <- lmer(metabolic_rate ~ treatment * avg_mass + 
+             (1|bee_ID), data = bdta)
+summary(m1) # final model for paper
 
 #######################################################
 ## Metabolic Rate vs. loading conditions
@@ -418,12 +393,17 @@ anova(m2, m1, test = "LRT")
 summary(m2)
 
 
-# refref: new data, says treatment is not significant
+# treatment is not significant
 m3 <- update(m2, .~. - treatment)
+anova(m2, m3, test = "LRT")
 summary(m3)
 
 m3 <- update(m2, force ~ avg_mass + (1|bee_ID))
-summary(m3)
+summary(m3) 
+
+m4 <- update(m3, .~. - avg_mass)
+anova(m3, m4, test = "LRT")
+
 
 # Plot force vs. body mass + load
 fig3b_dta <- bdta %>%
@@ -495,10 +475,12 @@ dev.off()
 
 ```{r}
 
+# calculate mean and SD
+tapply(bdta$amp, INDEX = bdta$treatment, 
+       function(x) return(c(mean(x), sd(x))))
+
 # fit full model
 m1 <- lm(delta_amp ~  (I(scale(delta_perc_load)) +  I(scale(IT_span_mm)) + order_1)^2, data = newDF)
-
-
 summary(m1)
 car::vif(m1) # too high
 
@@ -567,10 +549,25 @@ fig4a
 
 ```{r}
 
+# how many trials increased
+newDF$FreqHigherInHeavy <- (newDF$freq_H - newDF$freq_L) > 0
+summary(newDF$FreqHigherInHeavy)
+sum(newDF$FreqHigherInHeavy) / nrow(newDF)
+
+# which treatment did freq decline
+tapply(newDF$FreqHigherInHeavy, INDEX = newDF$order_1, summary)
+
+# calculate mean + sd for each treatment
+tapply(bdta$freq, INDEX = bdta$treatment, function(x) c(mean(x), sd(x)))
+
+# visualize data to see where bees decreased frequency
+ggplot(newDF, aes(y = delta_freq, x = order_1)) + 
+         geom_point(aes(color = delta_freq < 0), 
+                    position = position_jitter(width = 0.05, height = 0))
+
+
 # fit full model
 m1 <- lm(delta_freq ~  (I(scale(delta_perc_load)) +  I(scale(IT_span_mm)) + order_1)^2, data = newDF)
-
-
 summary(m1)
 car::vif(m1) # too high
 
@@ -594,10 +591,14 @@ anova(m4,m5)
 summary(m5)
         
 m6 <- update(m5, .~. - I(scale(delta_perc_load)))
+anova(m5, m6)
 # final model for paper
 summary(m6) 
 
-# diagnostics
+anova(m6)
+
+# diagnostics - the qq plot is a little thin tailed, 
+# but I haven't found any transformations to help
 par(mfrow = c(2,3))
 plot(m6, which = 1:6)
 par(mfrow = c(1,1))
@@ -606,8 +607,6 @@ par(mfrow = c(1,1))
 
 ### model visualization -- no need to use partial residuals, since 
 ### there is only one predictor
-
-
 
 fig4b <- ggplot(newDF, aes(x= delta_perc_load, y = delta_freq)) +
   geom_point(aes(shape = order_1)) +
@@ -668,6 +667,7 @@ anova(mm3, mm4)
 
 
 mm5 <- update(mm4, .~. - delta_amp)
+anova(mm4, mm5)
 summary(mm5)
 
 par(mfrow = c(2,3))
@@ -735,11 +735,47 @@ fig5c <- ggplot(newDF, aes(x = delta_freq, y = delta_metabolic_rate)) +
   scale_shape_manual(values = c(6, 17))
 fig5c
 
+library(scales)
+
+fig5c + 
+  scale_y_continuous(trans="log",breaks = trans_breaks("log", function(x) exp(x)),
+                labels = trans_format("log", math_format(e^.x)))
+
 # ggsave(filename = file.path(figDir, "fig5c.png"), width = 6.5/2, height = 2,
 #         plot = fig5c,
 #        units = "in", dpi = 500)
 
 ```
+
+# delta metabolic rate / delta percent load
+
+```{r}
+
+# calculate new variables
+newDF <- newDF %>%
+  mutate(avg_perc_load = (perc_load_H + perc_load_L) / 2, 
+         dmr_dpl = delta_metabolic_rate / delta_perc_load)
+
+
+mod1 <- lm(dmr_dpl  ~ avg_perc_load + order_1 + IT_span_mm, data = newDF)
+summary(mod1)
+
+mod2 <- update(mod1, .~. - IT_span_mm)
+anova(mod1, mod2) 
+summary(mod2)
+
+mod3 <- update(mod2, .~. - order_1)
+anova(mod2, mod3) 
+
+summary(mod3) # final model for paper
+
+with(newDF, cor(dmr_dpl, avg_perc_load)**2)
+
+
+```
+
+
+
 
 
 # Session Info
