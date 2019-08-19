@@ -60,6 +60,4 @@ plot(data2$freq, data2$freq_v2)
 abline(0, 1)
 
 
-t.test(data2$freq, data2$freq_v2, paired = TRUE)
-
 write_csv(data2, file.path(getwd(), "data", "beeRespData_freqUpdated.csv"))

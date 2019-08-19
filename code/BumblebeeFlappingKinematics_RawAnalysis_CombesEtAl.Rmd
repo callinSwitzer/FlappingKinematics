@@ -14,29 +14,6 @@ knitr::opts_knit$set(root.dir = rprojroot::find_rstudio_root_file())
 ```
 
 
-### Updates from first submission
-
----
-
-1. Remove all delta variable ^2's
-2. Re-named variables to make them easier to read
-3. Removed analysis that used arclen
-
-
----
-
-### Avenues of analysis:
-
-1. Confirm expectation that Metabolic rate and a proxy for translational 
-force production increased with total mass supported during flight.
-
-2.  we see how $\Delta$load affects $\Delta$amplitude and $\Delta$frequency, 
-accounting for bee size and treatment order
-
-3.  We check to see how $\Delta$frequency and $\Delta$amplitude are associated 
-with $\Delta$MetabolicRate, while accounting for $\Delta$load
-
-
 ---
 
 ### Measured variables:
@@ -138,7 +115,7 @@ bdta <- raw_data %>%
          IT_span = Itspan, 
          treatment = Treatment, 
          bee_ID  = BeeID, 
-         freq = freq_v2 # updated frequency data
+         freq = freq_audio # updated frequency data
          ) %>%
   # calculate new variables
   mutate(
@@ -205,6 +182,16 @@ newDF <- newDF %>%
                       "1" = "loadedFirst")
   
     )
+
+```
+
+
+```{r}
+# corr for audio vs. video frequency data
+plot(bdta$freq, bdta$freq_video)
+abline(0,1)
+cor(bdta$freq, bdta$freq_video)
+
 
 ```
 
@@ -505,10 +492,14 @@ summary(m5)
         
 m6 <- update(m5, .~. -I(scale(IT_span_mm)) )
 summary(m6) 
+anova(m5, m6)
+
 
 # final model for paper
 m6 <- update(m6, .~ delta_perc_load)
 summary(m6)
+
+#write.table(as.data.frame(summary(m6)$coef),"clipboard",sep="\t")
  
 # diagnostics
 par(mfrow = c(2,3))
@@ -541,6 +532,9 @@ fig4a
 #        units = "in", dpi = 500)
 
 
+# calculate correlation coefficient
+cor(newDF$delta_amp, newDF$delta_perc_load)**2
+
 ```
 
 
@@ -560,9 +554,9 @@ tapply(newDF$FreqHigherInHeavy, INDEX = newDF$order_1, summary)
 tapply(bdta$freq, INDEX = bdta$treatment, function(x) c(mean(x), sd(x)))
 
 # visualize data to see where bees decreased frequency
-ggplot(newDF, aes(y = delta_freq, x = order_1)) + 
-         geom_point(aes(color = delta_freq < 0)) + 
-  geom_text(aes(label=bee_ID),hjust=0.1, vjust=0, position= position_jitter()) 
+# ggplot(newDF, aes(y = delta_freq, x = order_1)) + 
+#          geom_point(aes(color = delta_freq < 0)) + 
+#   geom_text(aes(label=bee_ID),hjust=0.1, vjust=0, position= position_jitter()) 
 
 
 # fit full model
@@ -595,6 +589,9 @@ anova(m5, m6)
 summary(m6) 
 
 anova(m6)
+write.table(as.data.frame(round(summary(m6)$coef, 4)),"clipboard",sep="\t")
+
+
 
 # diagnostics - the qq plot is a little thin tailed, 
 # but I haven't found any transformations to help
@@ -628,6 +625,9 @@ fig4b
 #         plot = fig4b,
 #        units = "in", dpi = 500)
 
+# calculate correlation coefficients
+cor(newDF$delta_freq, newDF$delta_perc_load)**2
+
 ```
 
 
@@ -640,6 +640,12 @@ fig4b
 ## 5a change in metabolic rate vs. change in amplitude
 
 ```{r}
+
+# calculate correlations
+cor(newDF$delta_metabolic_rate, newDF$delta_perc_load)**2
+cor(newDF$delta_metabolic_rate, newDF$delta_amp)**2
+cor(newDF$delta_metabolic_rate, newDF$delta_freq)**2
+
 
 mm1 <- lm(log(delta_metabolic_rate) ~  delta_amp + delta_freq +  
             delta_perc_load + IT_span_mm + order_1, data = newDF)
@@ -663,6 +669,9 @@ anova(mm3, mm2)
 mm4 <- update(mm3, .~. - IT_span_mm)
 summary(mm4) # final model for paper
 anova(mm3, mm4)
+
+
+write.table(as.data.frame(round(summary(mm4)$coef, 4)),"clipboard",sep="\t")
 
 
 mm5 <- update(mm4, .~. - delta_amp)
@@ -746,6 +755,8 @@ fig5c +
 
 ```
 
+
+# Figure 6
 # delta metabolic rate / delta percent load
 
 ```{r}
@@ -776,23 +787,28 @@ with(newDF, cor(damp_dpl, avg_perc_load)**2)
 with(newDF, cor(dfreq_dpl, avg_perc_load)**2)
 
 
+cor(newDF$delta_load_not_centered, newDF$IT_span)**2
+cor(newDF$delta_perc_load, newDF$IT_span)**2
+
+with(bdta[bdta$treatment == "H",], cor(amp, freq)**2)
+with(bdta[bdta$treatment == "L",], cor(amp, freq)**2)
+
+with(bdta[bdta$treatment == "L",], plot(amp, freq))
+
+cor(newDF$delta_amp, newDF$delta_freq)**2
+
+ggplot(newDF, aes(y = delta_amp, x = delta_freq)) + 
+  geom_point(aes(color = order_1))
+
+
 ```
 
 
+### Signal processing examples
+
 ```{r}
-# rolling variance example
-# works on "missing fundamental" signals
 
-xx = seq(0, 1, length.out = 1000)
-b = sin(2*pi*40*xx) + sin(2*pi*50*xx) + sin(2*pi*60*xx) + sin(2*pi*70*xx) + sin(2*pi*80*xx) + sin(2*pi*90*xx) +
-  sin(2*pi*100*xx)+ sin(2*pi*110*xx)+ sin(2*pi*120*xx)+ sin(2*pi*130*xx)+ sin(2*pi*140*xx) + rnorm(1000, sd = 0.1)
-
-b = shifter(b, n = 50)
-
-par(mfrow =c(2,2))
-plot(xx, b, type = 'l', main = "unprocessed, spiky signal", xlab = "time (s)", ylab = "unprocessed signal")
-
-
+## signal processing functions
 
 fft_calculator = function(timeSignal, log_rate){
     # calculate fft
@@ -817,6 +833,20 @@ shifter <- function(x, n = 1) {
   if (n == 0) x else c(tail(x, -n), head(x, n))
 }
 
+
+
+
+# rolling variance example
+# works on "missing fundamental" signals
+
+xx = seq(0, 1, length.out = 1000)
+b = sin(2*pi*40*xx) + sin(2*pi*50*xx) + sin(2*pi*60*xx) + sin(2*pi*70*xx) + sin(2*pi*80*xx) + sin(2*pi*90*xx) +
+  sin(2*pi*100*xx)+ sin(2*pi*110*xx)+ sin(2*pi*120*xx)+ sin(2*pi*130*xx)+ sin(2*pi*140*xx) + rnorm(1000, sd = 0.1)
+
+b = shifter(b, n = 50)
+
+par(mfrow =c(2,2))
+plot(xx, b, type = 'l', main = "unprocessed, spiky signal", xlab = "time (s)", ylab = "unprocessed signal")
 
 gaussianWindow = dnorm(seq(-4, 4, length.out = length(xx)))
 gaussianWindow = gaussianWindow*(1/max(gaussianWindow))
@@ -849,6 +879,49 @@ frq = fft_data[["frq"]]
 
 plot(abs(amplitudeAndPhase), x = frq, type = "l", xlab = "freq (Hz)", 
      ylab = "relative amplitude", main = "DFT spectrum of rolling variance signal", xlim = c(0, 200), yaxt = "none")
+
+
+### here's another example that's more similar to the 
+### audio data we have
+
+xx = seq(0, 1, length.out = 10000)
+amp = sin(2*pi*xx*5)
+b = amp* rnorm(length(xx), sd = 0.3)
+
+
+
+par(mfrow =c(2,2))
+plot(xx, b, type = 'l', main = "unprocessed, spiky signal", xlab = "time (s)", ylab = "unprocessed signal")
+gaussianWindow = dnorm(seq(-4, 4, length.out = length(xx)))
+gaussianWindow = gaussianWindow*(1/max(gaussianWindow))
+
+fft_data = fft_calculator(gaussianWindow*b, length(xx))
+
+
+amplitudeAndPhase = fft_data[["amplitudeAndPhase"]]
+frq = fft_data[["frq"]]
+
+plot(abs(amplitudeAndPhase), x = frq, type = "l", xlab = "freq (Hz)", 
+     ylab = "relative amplitude", main = "DFT spectrum of unprocessed, spiky signal", xlim = c(0, 200), yaxt = "none")
+
+roll_window = 500
+
+rollingVar = roll_var(as.matrix(b), width = roll_window, center = TRUE)
+rollingVar = shifter(rollingVar, n = roll_window/2)
+rollingVar = minmaxScale(rollingVar)
+rollingVar[is.na(rollingVar)] = 0
+
+
+plot(xx,rollingVar,  type = 'l', main = "rolling variance of original signal", xlab = "time (s)")
+
+fft_data = fft_calculator(gaussianWindow*(rollingVar), length(xx))
+
+amplitudeAndPhase = fft_data[["amplitudeAndPhase"]]
+frq = fft_data[["frq"]]
+
+plot(abs(amplitudeAndPhase), x = frq, type = "l", xlab = "freq (Hz)", 
+     ylab = "relative amplitude", main = "DFT spectrum of rolling variance signal", xlim = c(0, 200), yaxt = "none")
+
 
 ```
 
