@@ -1,7 +1,7 @@
 ---
 title: "Bumblebee Flapping Kinematics Revision 1"
 author: "Callin Switzer"
-date: "July 25, 2019"
+date: "August 19, 2019"
 output: html_document
 editor_options: 
   chunk_output_type: console
@@ -94,7 +94,7 @@ print(R.version)
 
 
 ```{r}
-raw_data <- read_csv(file.path(dataDir, "beeRespData_freqUpdated.csv"))
+raw_data <- read_csv(file.path(dataDir, "beeRespData_Revision1.csv"))
 summary(raw_data)
 ```
 
@@ -535,6 +535,7 @@ fig4a
 # calculate correlation coefficient
 cor(newDF$delta_amp, newDF$delta_perc_load)**2
 
+
 ```
 
 
@@ -645,6 +646,9 @@ cor(newDF$delta_freq, newDF$delta_perc_load)**2
 cor(newDF$delta_metabolic_rate, newDF$delta_perc_load)**2
 cor(newDF$delta_metabolic_rate, newDF$delta_amp)**2
 cor(newDF$delta_metabolic_rate, newDF$delta_freq)**2
+
+# correlation of log delta met rate
+cor(log(newDF$delta_metabolic_rate), newDF$delta_freq)**2
 
 
 mm1 <- lm(log(delta_metabolic_rate) ~  delta_amp + delta_freq +  
